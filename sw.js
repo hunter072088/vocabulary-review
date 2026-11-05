@@ -1,13 +1,14 @@
 /**
- * VocabBuddy - Service Worker (v1)
+ * VocabBuddy - Service Worker (v2)
  * 支援 Android (Pixel / Chrome WebAPK)、iOS Safari 與桌面版 Chrome/Edge 一鍵安裝與離線快取。
  */
 
-const CACHE_NAME = "vocabbuddy-v1";
+const CACHE_NAME = "vocabbuddy-v2";
 const ASSETS_TO_CACHE = [
   "./",
   "./index.html",
   "./styles.css",
+  "./qrcode.js",
   "./data.js",
   "./app.js",
   "./manifest.json",

@@ -3,20 +3,63 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>英語全方位學習與測驗系統 | Tech & Business Vocabulary Suite</title>
+  <title>VocabBuddy — 英語全方位學習與測驗系統</title>
+  <meta name="description" content="專為工程、商務與職涯打造的互動式英語單字閃卡、閱讀理解、雙人聽力跟讀與弱點測驗系統。" />
+
+  <script>
+    // 確保 GitHub Pages 子目錄網址結尾有斜線，讓 manifest.json 與 sw.js 正確解析
+    if (location.pathname.endsWith('/vocabulary-review')) {
+      location.replace(location.pathname + '/' + location.search + location.hash);
+    }
+  </script>
+
+  <!-- PWA & Mobile Web App Meta -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#1e3a8a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="VocabBuddy" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- LINE / FB 內建瀏覽器偵測提醒橫幅 -->
+  <div id="inapp-browser-banner" class="inapp-browser-banner" style="display: none;">
+    <div>⚠️ 偵測到您正在使用 <strong>LINE / 應用程式內建瀏覽器</strong>。受限於系統安全機制，無法直接安裝。請點擊右上角「<strong>⋮</strong>」或分享，選擇<strong>【在預設瀏覽器 / Chrome 中開啟】</strong>即可一鍵安裝為手機 App！</div>
+    <button class="banner-close-btn" type="button" onclick="document.getElementById('inapp-browser-banner').style.display='none'">✕</button>
+  </div>
+
+  <!-- PWA 一鍵安裝浮動橫幅 (Android / Pixel / 桌面 Chrome) -->
+  <div id="pwa-install-banner" class="pwa-install-banner" style="display: none;">
+    <div class="pwa-install-info">
+      <img src="icons/icon-192.png" alt="VocabBuddy Icon" width="42" height="42" class="pwa-banner-icon" />
+      <div>
+        <div class="pwa-banner-title">安裝 VocabBuddy 英語學習 App</div>
+        <div class="pwa-banner-desc">常駐手機與電腦桌面，支援離線全螢幕背單字與聽力跟讀！</div>
+      </div>
+    </div>
+    <div class="pwa-install-actions">
+      <button id="pwa-banner-install-btn" class="btn-install-glow" type="button">📲 立即安裝</button>
+      <button id="pwa-banner-dismiss-btn" class="btn-ghost-light btn-sm" type="button">稍後</button>
+    </div>
+  </div>
+
   <!-- 頂部導覽與學習進度列 -->
   <header class="top-header">
     <div class="container header-inner">
       <div class="brand">
-        <div class="brand-logo">EN</div>
+        <img src="icons/icon-192.png" alt="VocabBuddy App Icon" class="brand-app-icon" width="50" height="50" />
         <div>
-          <h1 class="brand-title">英語全方位學習與測驗系統</h1>
+          <div class="brand-title-row">
+            <h1 class="brand-title">VocabBuddy 英語全方位學習系統</h1>
+            <span class="pwa-ready-badge">PWA App</span>
+          </div>
           <p class="brand-subtitle">半導體製程・商務合約・職涯培訓 59 核心字彙</p>
         </div>
       </div>
@@ -34,7 +77,10 @@
           <span class="stat-label">待加強</span>
           <strong id="stat-weak">0</strong>
         </div>
-        <button id="btn-reset-progress" class="btn-ghost btn-sm" title="重置熟記與錯題紀錄">重置進度</button>
+        <button id="open-install-modal-btn" class="btn-install-header" title="安裝到手機或電腦桌面">
+          <span>📱</span> 安裝 APP
+        </button>
+        <button id="btn-reset-progress" class="btn-ghost-light btn-sm" title="重置熟記與錯題紀錄">重置進度</button>
       </div>
     </div>
 
@@ -292,8 +338,58 @@
     </div>
   </div>
 
+  <!-- 手機/電腦安裝 PWA App 教學與一鍵安裝 Modal -->
+  <div id="install-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="install-modal-title">
+    <div class="modal-card install-modal-card">
+      <button id="install-modal-close" class="modal-close-btn" aria-label="關閉">&times;</button>
+      <div class="install-modal-header">
+        <img src="icons/icon-192.png" alt="VocabBuddy Icon" width="60" height="60" class="install-modal-icon" />
+        <div>
+          <span class="section-badge">PWA Native App</span>
+          <h3 id="install-modal-title" class="card-title">📱 一鍵安裝 VocabBuddy 到主畫面</h3>
+          <p class="text-muted">免透過商店下載 APK，直接安裝成全螢幕獨立 App，支援離線隨時背單字！</p>
+        </div>
+      </div>
+
+      <!-- 直接觸發系統安裝按鈕 -->
+      <button id="modal-direct-install-btn" class="btn-direct-install" type="button">
+        📲 點此立即彈出系統安裝視窗 (Android / 桌面 Chrome / Edge)
+      </button>
+
+      <!-- QR Code 與網址區 -->
+      <div class="qr-share-box">
+        <img id="install-qr-img" alt="App QR Code" width="120" height="120" class="qr-code-img" />
+        <div class="qr-share-info">
+          <strong>📷 手機相機掃描 QR Code 立即開啟</strong>
+          <p class="text-muted">或複製線上版網址在手機 Safari / Chrome 開啟：</p>
+          <div class="url-copy-row">
+            <input type="text" id="install-url-input" readonly value="https://hunter072088.github.io/vocabulary-review/" />
+            <button id="btn-copy-url" class="btn-secondary btn-sm" type="button">複製網址</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="os-guides-grid">
+        <div class="os-guide-box">
+          <strong>🤖 Android / Google Pixel (Chrome)</strong>
+          <ol>
+            <li>點擊上方綠色<strong>「📲 點此立即彈出系統安裝視窗」</strong>按鈕即可秒速安裝。</li>
+            <li>或點選 Chrome 右上角選單 <strong>「⋮」</strong> ➔ 選擇<strong>「安裝應用程式」</strong>或<strong>「加到主畫面」</strong>。</li>
+          </ol>
+        </div>
+        <div class="os-guide-box">
+          <strong>🍎 iPhone / iPad (iOS Safari)</strong>
+          <ol>
+            <li>使用 <strong>Safari 瀏覽器</strong>開啟本網頁。</li>
+            <li>點擊底部中間的<strong>「分享」圖示</strong>（方框向上箭頭）。</li>
+            <li>向下滑動點選<strong>「加入主畫面」</strong>，桌面即會出現可愛貓頭鷹圖示！</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
-

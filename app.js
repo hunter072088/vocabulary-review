@@ -855,5 +855,98 @@ document.addEventListener("DOMContentLoaded", () => {
     if (appState.activeModalWordId) toggleMastered(appState.activeModalWordId);
     document.getElementById("word-modal").classList.add("hidden");
   });
+
+  // ==================== PWA 手機/桌面安裝控制器 ====================
+  window.deferredInstallPrompt = null;
+
+  // 1. 偵測 LINE / FB / IG 內建瀏覽器
+  const ua = navigator.userAgent || navigator.vendor || window.opera || "";
+  if (/Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua)) {
+    const inAppBanner = document.getElementById("inapp-browser-banner");
+    if (inAppBanner) inAppBanner.style.display = "flex";
+  }
+
+  // 2. 設定線上網址與 QR Code
+  const publicUrl = location.protocol.startsWith("http")
+    ? location.href.split("#")[0]
+    : "https://hunter072088.github.io/vocabulary-review/";
+  const urlInput = document.getElementById("install-url-input");
+  const qrImg = document.getElementById("install-qr-img");
+  if (urlInput) urlInput.value = publicUrl;
+  if (qrImg) {
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(publicUrl)}`;
+  }
+
+  // 3. 監聽 Chrome / Edge / Android 原生安裝事件
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    window.deferredInstallPrompt = e;
+    if (!sessionStorage.getItem("vocab_pwa_dismissed")) {
+      const banner = document.getElementById("pwa-install-banner");
+      if (banner) banner.style.display = "flex";
+    }
+  });
+
+  window.addEventListener("appinstalled", () => {
+    window.deferredInstallPrompt = null;
+    const banner = document.getElementById("pwa-install-banner");
+    if (banner) banner.style.display = "none";
+    document.getElementById("install-modal").classList.add("hidden");
+    alert("🎉 恭喜！VocabBuddy 已成功安裝到您的主畫面！");
+  });
+
+  async function triggerPWAInstall() {
+    if (window.deferredInstallPrompt) {
+      window.deferredInstallPrompt.prompt();
+      const { outcome } = await window.deferredInstallPrompt.userChoice;
+      if (outcome === "accepted") {
+        const banner = document.getElementById("pwa-install-banner");
+        if (banner) banner.style.display = "none";
+      }
+      window.deferredInstallPrompt = null;
+    } else {
+      alert(
+        "💡 安裝提示：\n• Android / 電腦 Chrome：請點擊瀏覽器右上角選單「⋮」➔ 選擇「安裝應用程式」或「加到主畫面」。\n• iPhone / iPad：請使用 Safari 點擊底部「分享」➔ 選擇「加入主畫面」。"
+      );
+    }
+  }
+
+  document.getElementById("pwa-banner-install-btn").addEventListener("click", triggerPWAInstall);
+  document.getElementById("modal-direct-install-btn").addEventListener("click", triggerPWAInstall);
+
+  document.getElementById("pwa-banner-dismiss-btn").addEventListener("click", () => {
+    document.getElementById("pwa-install-banner").style.display = "none";
+    sessionStorage.setItem("vocab_pwa_dismissed", "1");
+  });
+
+  // 開關安裝教學 Modal
+  document.getElementById("open-install-modal-btn").addEventListener("click", () => {
+    document.getElementById("install-modal").classList.remove("hidden");
+  });
+  document.getElementById("install-modal-close").addEventListener("click", () => {
+    document.getElementById("install-modal").classList.add("hidden");
+  });
+  document.getElementById("install-modal").addEventListener("click", (e) => {
+    if (e.target.id === "install-modal") {
+      document.getElementById("install-modal").classList.add("hidden");
+    }
+  });
+
+  document.getElementById("btn-copy-url").addEventListener("click", () => {
+    navigator.clipboard.writeText(urlInput.value).then(() => {
+      const btn = document.getElementById("btn-copy-url");
+      btn.textContent = "✅ 已複製！";
+      setTimeout(() => (btn.textContent = "複製網址"), 2000);
+    });
+  });
+
+  // 4. 註冊 Service Worker (支援離線快取與 PWA 安裝)
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch((err) => {
+        console.warn("SW registration skipped:", err);
+      });
+    });
+  }
 });
 

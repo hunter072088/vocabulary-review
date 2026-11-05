@@ -1,0 +1,42 @@
+{
+  "name": "VocabBuddy — 英語全方位學習與測驗系統",
+  "short_name": "VocabBuddy",
+  "description": "專為工程、商務與職涯打造的互動式英語單字閃卡、閱讀理解、雙人聽力跟讀與弱點測驗系統。",
+  "id": "vocabbuddy-pwa",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#1e3a8a",
+  "lang": "zh-TW",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

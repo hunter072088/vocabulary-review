@@ -1,9 +1,3 @@
-<#
-.SYNOPSIS
-  VocabBuddy - Lightweight Local HTTP Server (Zero External Dependencies)
-  Uses Windows built-in .NET HttpListener so PWA Install (Service Worker & Manifest) works locally!
-#>
-
 param(
     [int]$Port = 8090,
     [string]$Path = $PSScriptRoot
@@ -24,9 +18,9 @@ try {
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "  🦉 VocabBuddy - 英語全方位學習系統 本地端 PWA 伺服器已啟動" -ForegroundColor Green
-Write-Host "  網址: $prefix (支援 Chrome/Edge 一鍵安裝為桌面 App)" -ForegroundColor Yellow
-Write-Host "  請勿關閉此視窗。按 Ctrl+C 可隨時停止伺服器。" -ForegroundColor DarkCyan
+Write-Host "  VocabBuddy Local PWA Server Started!" -ForegroundColor Green
+Write-Host "  URL: $prefix" -ForegroundColor Yellow
+Write-Host "  Press Ctrl+C to stop the server." -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 Start-Process $prefix
@@ -65,14 +59,14 @@ try {
 
             $response.ContentType = $contentType
             $response.AddHeader("Access-Control-Allow-Origin", "*")
-            $response.AddHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+            $response.AddHeader("Cache-Control", "no-cache")
 
             $bytes = [System.IO.File]::ReadAllBytes($fullPath)
             $response.ContentLength64 = $bytes.Length
             $response.OutputStream.Write($bytes, 0, $bytes.Length)
         } else {
             $response.StatusCode = 404
-            $errBytes = [System.Text.Encoding]::UTF8.GetBytes("404 Not Found: $localPath")
+            $errBytes = [System.Text.Encoding]::UTF8.GetBytes("404 Not Found")
             $response.OutputStream.Write($errBytes, 0, $errBytes.Length)
         }
         $response.Close()

@@ -1,6 +1,7 @@
 param(
     [int]$Port = 8090,
-    [string]$Path = $PSScriptRoot
+    [string]$Path = $PSScriptRoot,
+    [switch]$NoBrowser
 )
 
 $listener = New-Object System.Net.HttpListener
@@ -23,7 +24,7 @@ Write-Host "  URL: $prefix" -ForegroundColor Yellow
 Write-Host "  Press Ctrl+C to stop the server." -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-Start-Process $prefix
+if (-not $NoBrowser) { Start-Process $prefix }
 
 $mimeMap = @{
     ".html" = "text/html; charset=utf-8"

@@ -20,14 +20,13 @@ let appState = {
 
   // 需求 1: Shadowing 單字跟讀狀態
   shadowSelectedWordId: null,
-  shadowLoopTimer: null,
   shadowIsPlaying: false,
-  shadowCurrentIteration: 0,
-  shadowTotalIterations: 5,
 
-  // 需求 2: 總表篩選狀態
+  // 需求 2: 總表篩選與勾選狀態
   tableCategory: "all",
-  tableSearch: ""
+  tableSearch: "",
+  tableVisibleIds: [],
+  checkedIds: new Set()
 };
 
 // 全域 PWA 安裝事件暫存
@@ -212,34 +211,65 @@ function updateHeaderStats() {
 
 // 語音合成 (Web Speech API)
 let dialogueStopFlag = false;
+let speakSerial = 0;
+
+// 取消所有語音，並讓「尚未真正開始」的延遲播放一併失效
+function cancelSpeech() {
+  speakSerial++;
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function pickEnglishVoice() {
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((v) => v.lang === "en-US" && v.name.includes("Natural")) ||
+    voices.find((v) => v.lang === "en-US" && v.name.includes("Google")) ||
+    voices.find((v) => v.lang && v.lang.startsWith("en-US")) ||
+    voices.find((v) => v.lang && v.lang.startsWith("en")) ||
+    null
+  );
+}
 
 function speakText(text, rate = 1.0, pitch = 1.0, onEndCallback = null) {
   if (!("speechSynthesis" in window)) {
     alert("您的瀏覽器不支援語音合成功能。");
-    return;
+    return null;
   }
-  window.speechSynthesis.cancel();
+  const synth = window.speechSynthesis;
+  const myTurn = ++speakSerial;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = "en-US";
   utter.rate = rate;
   utter.pitch = pitch;
+  const voice = pickEnglishVoice();
+  if (voice) utter.voice = voice;
 
-  const voices = window.speechSynthesis.getVoices();
-  const enVoice =
-    voices.find((v) => v.lang === "en-US" && v.name.includes("Natural")) ||
-    voices.find((v) => v.lang === "en-US" && v.name.includes("Google")) ||
-    voices.find((v) => v.lang.startsWith("en-US")) ||
-    voices.find((v) => v.lang.startsWith("en"));
-  if (enVoice) utter.voice = enVoice;
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    if (onEndCallback) onEndCallback();
+  };
+  utter.onend = done;
+  utter.onerror = (ev) => {
+    // 由我們自己 cancel() 造成的中斷不算結束，避免舊回呼誤觸發下一句
+    const err = ev && ev.error;
+    if (err === "canceled" || err === "interrupted") return;
+    done();
+  };
+  // 保留參考，避免部分瀏覽器回收 utterance 後不再觸發 onend
+  window.__activeUtterance = utter;
 
-  if (onEndCallback) {
-    utter.onend = onEndCallback;
-    utter.onerror = () => {
-      // 避免中斷時卡住回調
-      onEndCallback();
-    };
+  if (synth.speaking || synth.pending) {
+    synth.cancel();
+    // Chrome 在 cancel 後立刻 speak 偶爾會被吞掉，稍等再播
+    setTimeout(() => {
+      if (myTurn === speakSerial) synth.speak(utter);
+    }, 90);
+  } else {
+    synth.speak(utter);
   }
-  window.speechSynthesis.speak(utter);
+  return utter;
 }
 
 // 切換單字狀態 (已熟記 / 待加強)
@@ -255,6 +285,7 @@ function toggleMastered(id) {
   saveProgress();
   renderVocabSection();
   renderVocabTable();
+  populateShadowWordDropdown();
   updateShadowWordTarget();
 }
 
@@ -276,6 +307,7 @@ function toggleWeak(id, forceAdd = false) {
   saveProgress();
   renderVocabSection();
   renderVocabTable();
+  populateShadowWordDropdown();
   updateShadowWordTarget();
 }
 
@@ -411,6 +443,14 @@ function renderFlashcard(list) {
 }
 
 // ==================== 模組 2：單獨單字/片語 Shadowing 連續重複播放 ====================
+let shadowToken = 0; // 每次開始/停止都會遞增，讓過期的計時器與語音回呼自動失效
+let currentShadowRun = null;
+
+function setShadowStatus(text) {
+  const el = document.getElementById("shadow-status-text");
+  if (el) el.textContent = text;
+}
+
 function initShadowingStation() {
   populateShadowWordDropdown();
   if (activeVocabList.length > 0 && !appState.shadowSelectedWordId) {
@@ -418,33 +458,25 @@ function initShadowingStation() {
   }
   updateShadowWordTarget();
 
-  // 下拉選單切換單字
-  const selectEl = document.getElementById("shadow-word-select");
-  if (selectEl) {
-    selectEl.addEventListener("change", (e) => {
-      stopShadowLoop();
-      appState.shadowSelectedWordId = Number(e.target.value);
-      updateShadowWordTarget();
-    });
-  }
+  document.getElementById("shadow-word-select").addEventListener("change", (e) => {
+    stopShadowLoop();
+    appState.shadowSelectedWordId = Number(e.target.value);
+    updateShadowWordTarget();
+  });
 
-  // 播放與停止按鈕
-  document.getElementById("shadow-start-btn").addEventListener("click", startShadowLoop);
-  document.getElementById("shadow-stop-btn").addEventListener("click", stopShadowLoop);
+  document.getElementById("shadow-start-btn").addEventListener("click", () => startShadowLoop());
+  document.getElementById("shadow-stop-btn").addEventListener("click", () => stopShadowLoop());
+
   document.getElementById("shadow-speak-ex-btn").addEventListener("click", () => {
+    stopShadowLoop();
     const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
     if (item && item.example) {
       speakText(item.example, parseFloat(document.getElementById("shadow-rate").value) || 1.0);
     }
   });
 
-  // 上下一個單字按鈕
-  document.getElementById("shadow-prev-btn").addEventListener("click", () => {
-    navigateShadowWord(-1);
-  });
-  document.getElementById("shadow-next-btn").addEventListener("click", () => {
-    navigateShadowWord(1);
-  });
+  document.getElementById("shadow-prev-btn").addEventListener("click", () => navigateShadowWord(-1));
+  document.getElementById("shadow-next-btn").addEventListener("click", () => navigateShadowWord(1));
 }
 
 function populateShadowWordDropdown() {
@@ -493,7 +525,8 @@ function updateShadowWordTarget() {
     statusTag.textContent = "⚡ 待加強弱點";
     statusTag.className = "status-indicator weak";
   } else {
-    statusTag.style.display = "none";
+    statusTag.textContent = "";
+    statusTag.className = "status-indicator";
   }
 
   document.getElementById("shadow-ex-en").textContent = item.example || "（目前無設定專屬例句）";
@@ -510,98 +543,228 @@ function navigateShadowWord(direction) {
   updateShadowWordTarget();
 }
 
+// 從單字卡／總表按「跟讀」：切到跟讀室，只練習該單字
 function quickJumpToShadow(wordId) {
   stopShadowLoop();
   appState.shadowSelectedWordId = wordId;
-  // 切換至 Tab 2 (listening)
+  const scopeEl = document.getElementById("shadow-scope");
+  if (scopeEl) scopeEl.value = "current";
   const tabBtn = document.querySelector('.nav-tab[data-tab="listening"]');
   if (tabBtn) tabBtn.click();
+  populateShadowWordDropdown();
   updateShadowWordTarget();
   const box = document.getElementById("shadow-target-box");
   if (box) box.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function startShadowLoop() {
-  const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
-  if (!item) return;
-
-  stopShadowLoop();
-  appState.shadowIsPlaying = true;
-  appState.shadowCurrentIteration = 0;
-
-  const repeatVal = parseInt(document.getElementById("shadow-repeat-count").value, 10) || 5;
-  appState.shadowTotalIterations = repeatVal;
-
-  const targetBox = document.getElementById("shadow-target-box");
-  if (targetBox) targetBox.classList.add("is-looping");
-
-  runNextShadowIteration();
+function shuffleCopy(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
-function runNextShadowIteration() {
-  if (!appState.shadowIsPlaying) return;
+// 依「練習範圍」組出這輪要練的單字 id 佇列
+function buildShadowQueue() {
+  const scope = document.getElementById("shadow-scope").value;
+  const order = document.getElementById("shadow-order").value;
+  let ids;
+  if (scope === "all") {
+    ids = activeVocabList.map((v) => v.id);
+  } else if (scope === "weak") {
+    ids = activeVocabList.filter((v) => appState.weakIds.includes(v.id)).map((v) => v.id);
+  } else if (scope === "checked") {
+    ids = activeVocabList.filter((v) => appState.checkedIds.has(v.id)).map((v) => v.id);
+  } else {
+    ids = appState.shadowSelectedWordId ? [appState.shadowSelectedWordId] : [];
+  }
 
-  const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
-  if (!item) {
-    stopShadowLoop();
+  if (order === "random") {
+    ids = shuffleCopy(ids);
+  } else if (scope !== "current") {
+    // 依序模式：從目前選取的單字開始往下
+    const start = ids.indexOf(appState.shadowSelectedWordId);
+    if (start > 0) ids = ids.slice(start).concat(ids.slice(0, start));
+  }
+  return ids;
+}
+
+function startShadowLoop() {
+  stopShadowLoop(false);
+
+  const scope = document.getElementById("shadow-scope").value;
+  const queue = buildShadowQueue();
+  if (queue.length === 0) {
+    const hint = {
+      checked: "⚠️ 尚未勾選任何單字：請先到「📋 單字總表」勾選要練習的單字，再回來開始。",
+      weak: "⚠️ 「待加強弱點本」目前是空的：請先在單字卡標記待加強，或改選其他練習範圍。",
+      all: "⚠️ 單字庫是空的，請先匯入單字。",
+      current: "⚠️ 請先選擇要練習的單字。"
+    };
+    setShadowStatus(hint[scope] || hint.current);
     return;
   }
 
-  appState.shadowCurrentIteration++;
-  const mode = document.getElementById("shadow-play-target").value; // 'word' | 'both' | 'example'
-  const rate = parseFloat(document.getElementById("shadow-rate").value) || 1.0;
-  const intervalSec = parseFloat(document.getElementById("shadow-interval").value) || 1.8;
+  const run = {
+    token: ++shadowToken,
+    queue,
+    scope,
+    qi: 0,
+    iter: 0,
+    round: 1,
+    repeat: parseInt(document.getElementById("shadow-repeat-count").value, 10) || 5,
+    listLoop: document.getElementById("shadow-list-loop").value === "1",
+    order: document.getElementById("shadow-order").value,
+    mode: document.getElementById("shadow-play-target").value, // word | both | example
+    rate: parseFloat(document.getElementById("shadow-rate").value) || 1.0,
+    gap: parseFloat(document.getElementById("shadow-interval").value) || 1.8,
+    timer: null,
+    watchdog: null
+  };
+  currentShadowRun = run;
+  appState.shadowIsPlaying = true;
+  const box = document.getElementById("shadow-target-box");
+  if (box) box.classList.add("is-looping");
 
-  const iterText =
-    appState.shadowTotalIterations >= 999
-      ? `第 ${appState.shadowCurrentIteration} 次 (無限循環中)`
-      : `第 ${appState.shadowCurrentIteration} / ${appState.shadowTotalIterations} 次播放`;
-  document.getElementById("shadow-status-text").textContent = `🔊 正在播放：${item.word}（${iterText}）... 請仔細聽並跟讀！`;
+  shadowStep(run);
+}
 
-  let speechText = item.word;
-  if (mode === "example" && item.example) {
-    speechText = item.example;
-  } else if (mode === "both" && item.example) {
-    speechText = `${item.word}... ${item.example}`;
-  }
+function shadowStep(run) {
+  if (run.token !== shadowToken) return;
 
-  speakText(speechText, rate, 1.0, () => {
-    if (!appState.shadowIsPlaying) return;
-
-    if (
-      appState.shadowTotalIterations < 999 &&
-      appState.shadowCurrentIteration >= appState.shadowTotalIterations
-    ) {
-      document.getElementById("shadow-status-text").textContent = `🎉 已完成 ${appState.shadowTotalIterations} 次連續跟讀！開口記憶力滿點！`;
-      stopShadowLoop(false);
+  const id = run.queue[run.qi];
+  const item = activeVocabList.find((v) => v.id === id);
+  if (!item) {
+    // 這個單字在播放途中被刪除了，略過
+    run.queue.splice(run.qi, 1);
+    if (run.queue.length === 0) {
+      finishShadow(run, "⚠️ 練習中的單字已被刪除，已停止。");
       return;
     }
+    if (run.qi >= run.queue.length) run.qi = 0;
+    shadowStep(run);
+    return;
+  }
 
-    document.getElementById("shadow-status-text").textContent = `⏳ 停頓 ${intervalSec} 秒留給你複述開口跟讀 (Shadowing)...`;
-    appState.shadowLoopTimer = setTimeout(() => {
-      runNextShadowIteration();
-    }, intervalSec * 1000);
-  });
+  if (appState.shadowSelectedWordId !== id) {
+    appState.shadowSelectedWordId = id;
+    updateShadowWordTarget();
+  }
+
+  run.iter++;
+  const infinite = run.repeat >= 999;
+  const iterText = infinite ? `第 ${run.iter} 次（無限循環）` : `第 ${run.iter} / ${run.repeat} 次`;
+  const listText = run.queue.length > 1 ? `｜清單 ${run.qi + 1}/${run.queue.length}（第 ${run.round} 輪）` : "";
+  setShadowStatus(`🔊 播放中：${item.word}｜${iterText}${listText} … 請跟著大聲唸！`);
+
+  let text = item.word;
+  if (run.mode === "example" && item.example) {
+    text = item.example;
+  } else if (run.mode === "both" && item.example) {
+    text = `${item.word}... ${item.example}`;
+  }
+
+  speakShadow(run, text, () => shadowAdvance(run));
+}
+
+// 播放一次；若瀏覽器沒有觸發 onend（常見的 Chrome 語音 bug），用保險計時器繼續
+function speakShadow(run, text, onDone) {
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(run.watchdog);
+    if (run.token === shadowToken) onDone();
+  };
+  run.watchdog = setTimeout(done, Math.max(3000, (text.length * 180) / run.rate) + 3000);
+  speakText(text, run.rate, 1.0, done);
+}
+
+function shadowWait(run, message, next) {
+  setShadowStatus(message);
+  run.timer = setTimeout(() => {
+    if (run.token === shadowToken) next();
+  }, run.gap * 1000);
+}
+
+function shadowAdvance(run) {
+  if (run.token !== shadowToken) return;
+
+  const infinite = run.repeat >= 999;
+  if (infinite || run.iter < run.repeat) {
+    shadowWait(run, `⏳ 停頓 ${run.gap} 秒，換你開口跟讀 (Shadowing)…`, () => shadowStep(run));
+    return;
+  }
+
+  // 這個單字的重複次數已完成 → 下一個單字
+  run.iter = 0;
+  run.qi++;
+  if (run.qi >= run.queue.length) {
+    if (!run.listLoop) {
+      const n = run.queue.length;
+      finishShadow(run, n > 1 ? `🎉 清單 ${n} 個單字已練習完一輪！` : `🎉 已完成 ${run.repeat} 次連續跟讀！`);
+      return;
+    }
+    run.qi = 0;
+    run.round++;
+    if (run.order === "random") run.queue = shuffleCopy(run.queue);
+  }
+  shadowWait(run, `⏭️ 準備練習下一個單字…`, () => shadowStep(run));
+}
+
+function finishShadow(run, message) {
+  if (run.token !== shadowToken) return;
+  stopShadowLoop(false);
+  setShadowStatus(message);
 }
 
 function stopShadowLoop(resetStatus = true) {
-  appState.shadowIsPlaying = false;
-  if (appState.shadowLoopTimer) {
-    clearTimeout(appState.shadowLoopTimer);
-    appState.shadowLoopTimer = null;
+  shadowToken++;
+  if (currentShadowRun) {
+    clearTimeout(currentShadowRun.timer);
+    clearTimeout(currentShadowRun.watchdog);
+    currentShadowRun = null;
   }
-  window.speechSynthesis.cancel();
+  appState.shadowIsPlaying = false;
+  cancelSpeech();
 
-  const targetBox = document.getElementById("shadow-target-box");
-  if (targetBox) targetBox.classList.remove("is-looping");
+  const box = document.getElementById("shadow-target-box");
+  if (box) box.classList.remove("is-looping");
+  if (resetStatus) setShadowStatus("已停止播放，待機中");
+}
 
-  if (resetStatus) {
-    const statusText = document.getElementById("shadow-status-text");
-    if (statusText) statusText.textContent = "已停止播放，待機中";
+// ==================== 模組 3：單字總表管理 (匯入、刪除、勾選、過濾、匯出) ====================
+const CHECKED_KEY = "vocab_app_checked_v1";
+
+function loadChecked() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CHECKED_KEY) || "[]");
+    appState.checkedIds = new Set(Array.isArray(raw) ? raw : []);
+  } catch (e) {
+    appState.checkedIds = new Set();
   }
 }
 
-// ==================== 模組 3：單字總表管理 (匯入、刪除、過濾、匯出) ====================
+function saveChecked() {
+  try {
+    localStorage.setItem(CHECKED_KEY, JSON.stringify([...appState.checkedIds]));
+  } catch (e) {
+    console.warn("無法寫入勾選清單:", e);
+  }
+}
+
+function updateCheckedCount() {
+  const el = document.getElementById("table-checked-count");
+  if (el) el.textContent = appState.checkedIds.size;
+  const all = document.getElementById("table-check-all");
+  if (all) {
+    const vis = appState.tableVisibleIds || [];
+    all.checked = vis.length > 0 && vis.every((id) => appState.checkedIds.has(id));
+  }
+}
+
 function renderVocabTable() {
   const tbody = document.getElementById("vocab-table-body");
   if (!tbody) return;
@@ -624,17 +787,19 @@ function renderVocabTable() {
     return true;
   });
 
+  appState.tableVisibleIds = filtered.map((i) => i.id);
   document.getElementById("table-showing-count").textContent = filtered.length;
   document.getElementById("table-total-count").textContent = activeVocabList.length;
 
   if (filtered.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" style="text-align: center; padding: 36px; color: var(--text-muted);">
+        <td colspan="9" style="text-align: center; padding: 36px; color: var(--text-muted);">
           🔍 沒有符合過濾條件的單字。可點擊上方「📥 批次匯入新單字」新增！
         </td>
       </tr>
     `;
+    updateCheckedCount();
     return;
   }
 
@@ -642,14 +807,16 @@ function renderVocabTable() {
     .map((item, idx) => {
       const isMastered = appState.masteredIds.includes(item.id);
       const isWeak = appState.weakIds.includes(item.id);
+      const isChecked = appState.checkedIds.has(item.id);
       const rowClass = isMastered ? "row-mastered" : isWeak ? "row-weak" : "";
       return `
       <tr class="${rowClass}">
+        <td style="text-align:center;"><input type="checkbox" class="row-check" data-id="${item.id}" ${isChecked ? "checked" : ""} aria-label="勾選 ${item.word}" /></td>
         <td><strong>${idx + 1}</strong></td>
         <td>
           <div class="table-word-cell">
             <span>${item.word}</span>
-            <button class="btn-audio btn-sm" onclick="speakText('${item.word.replace(/'/g, "\\'")}')" title="播放發音">🔊</button>
+            <button class="btn-audio btn-sm" type="button" onclick="speakText('${item.word.replace(/'/g, "\\'")}')" title="播放發音">🔊</button>
           </div>
         </td>
         <td class="table-phonetic-cell">${item.phonetic || "-"}</td>
@@ -662,17 +829,95 @@ function renderVocabTable() {
         </td>
         <td>
           <div class="table-action-btns">
-            <button class="btn-icon-sm" onclick="quickJumpToShadow(${item.id})" title="跳至跟讀訓練室反覆練習">🎧 跟讀</button>
-            <button class="btn-icon-sm" onclick="toggleMastered(${item.id})" title="切換已熟記狀態">
+            <button class="btn-icon-sm" type="button" onclick="quickJumpToShadow(${item.id})" title="跳至跟讀訓練室反覆練習">🎧 跟讀</button>
+            <button class="btn-icon-sm" type="button" onclick="toggleMastered(${item.id})" title="切換已熟記狀態">
               ${isMastered ? "✅ 熟" : "⬜ 熟"}
             </button>
-            <button class="btn-icon-sm btn-del-sm" onclick="deleteSingleWord(${item.id})" title="刪除此單字">🗑️ 刪除</button>
+            <button class="btn-icon-sm btn-del-sm" type="button" onclick="deleteSingleWord(${item.id})" title="刪除此單字">🗑️ 刪除</button>
           </div>
         </td>
       </tr>
     `;
     })
     .join("");
+  updateCheckedCount();
+}
+
+// 勾選框（事件委派）
+function handleTableCheckChange(e) {
+  const t = e.target;
+  if (t && t.classList && t.classList.contains("row-check")) {
+    const id = Number(t.getAttribute("data-id"));
+    if (t.checked) appState.checkedIds.add(id);
+    else appState.checkedIds.delete(id);
+    saveChecked();
+    updateCheckedCount();
+  }
+}
+
+function handleTableCheckAll(e) {
+  const on = e.target.checked;
+  (appState.tableVisibleIds || []).forEach((id) => {
+    if (on) appState.checkedIds.add(id);
+    else appState.checkedIds.delete(id);
+  });
+  saveChecked();
+  renderVocabTable();
+}
+
+// 一次刪除多個單字
+function deleteWordsByIds(ids, label) {
+  if (!ids.length) {
+    alert(`目前沒有${label}可以刪除。`);
+    return;
+  }
+  if (!confirm(`確定要刪除 ${ids.length} 個${label}嗎？\n（之後仍可「還原預設單字庫」或重新匯入）`)) return;
+
+  const set = new Set(ids);
+  activeVocabList = activeVocabList.filter((v) => !set.has(v.id));
+  appState.masteredIds = appState.masteredIds.filter((id) => !set.has(id));
+  appState.weakIds = appState.weakIds.filter((id) => !set.has(id));
+  ids.forEach((id) => appState.checkedIds.delete(id));
+
+  if (set.has(appState.shadowSelectedWordId)) {
+    stopShadowLoop();
+    appState.shadowSelectedWordId = activeVocabList.length > 0 ? activeVocabList[0].id : null;
+  }
+
+  saveVocabData();
+  saveProgress();
+  saveChecked();
+  renderVocabSection();
+  renderVocabTable();
+  populateShadowWordDropdown();
+  updateShadowWordTarget();
+}
+
+function deleteCheckedWords() {
+  deleteWordsByIds([...appState.checkedIds].filter((id) => activeVocabList.some((v) => v.id === id)), "已勾選的單字");
+}
+
+function deleteMasteredWords() {
+  deleteWordsByIds(
+    activeVocabList.filter((v) => appState.masteredIds.includes(v.id)).map((v) => v.id),
+    "已熟記的單字"
+  );
+}
+
+// 把勾選的單字送去跟讀訓練室
+function shadowCheckedWords() {
+  const ids = activeVocabList.filter((v) => appState.checkedIds.has(v.id)).map((v) => v.id);
+  if (!ids.length) {
+    alert("請先在總表左側勾選要跟讀的單字。");
+    return;
+  }
+  stopShadowLoop();
+  appState.shadowSelectedWordId = ids[0];
+  document.getElementById("shadow-scope").value = "checked";
+  document.querySelector('.nav-tab[data-tab="listening"]').click();
+  populateShadowWordDropdown();
+  updateShadowWordTarget();
+  setShadowStatus(`已載入 ${ids.length} 個勾選單字，設定好次數後按「開始連續循環跟讀」。`);
 }
 
 // 刪除熟悉或不需要的單字 (需求 2)
@@ -684,6 +929,8 @@ function deleteSingleWord(id) {
     activeVocabList = activeVocabList.filter((v) => v.id !== id);
     appState.masteredIds = appState.masteredIds.filter((wId) => wId !== id);
     appState.weakIds = appState.weakIds.filter((wId) => wId !== id);
+    appState.checkedIds.delete(id);
+    saveChecked();
 
     if (appState.shadowSelectedWordId === id) {
       stopShadowLoop();
@@ -1298,14 +1545,25 @@ function openWordModal(id) {
 
 // ==================== 初始化與事件綁定 ====================
 document.addEventListener("DOMContentLoaded", () => {
-  initVocabData();
-  loadProgress();
-  updateHeaderStats();
-  renderVocabSection();
-  initShadowingStation();
-  renderListeningSection();
-  renderVocabTable();
-  loadStandardQuiz();
+  // 每個初始化步驟獨立保護：任何一步出錯都不能讓後面的分頁／按鈕失效
+  const safe = (name, fn) => {
+    try {
+      fn();
+    } catch (err) {
+      console.error("[VocabBuddy] 初始化失敗：" + name, err);
+    }
+  };
+
+  safe("initVocabData", initVocabData);
+  safe("loadProgress", loadProgress);
+  safe("loadChecked", loadChecked);
+  safe("updateHeaderStats", updateHeaderStats);
+  safe("renderVocabSection", renderVocabSection);
+  safe("initShadowingStation", initShadowingStation);
+  safe("renderReadingSection", renderReadingSection);
+  safe("renderListeningSection", renderListeningSection);
+  safe("renderVocabTable", renderVocabTable);
+  safe("loadStandardQuiz", loadStandardQuiz);
 
   // 切換五大模組 Tabs
   document.querySelectorAll(".nav-tab").forEach((tab) => {
@@ -1315,7 +1573,7 @@ document.addEventListener("DOMContentLoaded", () => {
       tab.classList.add("active");
       const target = tab.getAttribute("data-tab");
       document.getElementById(`tab-${target}`).classList.add("active");
-      window.speechSynthesis.cancel();
+      cancelSpeech();
       stopShadowLoop();
       dialogueStopFlag = true;
 
@@ -1433,6 +1691,13 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-export-vocab").addEventListener("click", exportVocabJson);
   document.getElementById("btn-restore-defaults").addEventListener("click", restoreDefaultVocab);
 
+  // 總表勾選 / 批次刪除 / 送去跟讀
+  document.getElementById("vocab-table-body").addEventListener("change", handleTableCheckChange);
+  document.getElementById("table-check-all").addEventListener("change", handleTableCheckAll);
+  document.getElementById("btn-shadow-checked").addEventListener("click", shadowCheckedWords);
+  document.getElementById("btn-delete-checked").addEventListener("click", deleteCheckedWords);
+  document.getElementById("btn-delete-mastered").addEventListener("click", deleteMasteredWords);
+
   // 閱讀模組按鈕
   document.getElementById("btn-toggle-reading-zh").addEventListener("click", () => {
     appState.showReadingZh = !appState.showReadingZh;
@@ -1456,7 +1721,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-play-dialogue").addEventListener("click", () => playFullDialogue(0));
   document.getElementById("btn-stop-dialogue").addEventListener("click", () => {
     dialogueStopFlag = true;
-    window.speechSynthesis.cancel();
+    cancelSpeech();
     document.querySelectorAll(".dialogue-turn").forEach((el) => el.classList.remove("playing"));
   });
 
@@ -1524,8 +1789,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inAppBanner) inAppBanner.style.display = "flex";
   }
 
-  // 註冊 Service Worker
+  // 註冊 Service Worker（有新版時自動重新載入，避免畫面停在舊版）
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloaded) {
+        reloaded = true;
+        location.reload();
+      }
+    });
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("sw.js").catch((err) => {
         console.warn("SW registration skipped:", err);

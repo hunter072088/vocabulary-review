@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2.5" />
+  <link rel="stylesheet" href="styles.css?v=3.0" />
 </head>
 <body>
   <!-- LINE / FB 內建瀏覽器偵測提醒橫幅 -->
@@ -234,6 +234,33 @@
           <!-- 右側參數控制面板 -->
           <div class="shadow-player-right">
             <h4 class="settings-title">⚙️ 跟讀與循環播放設定</h4>
+
+            <div class="setting-item">
+              <label for="shadow-scope">🎯 練習範圍：</label>
+              <select id="shadow-scope" class="select-control">
+                <option value="current" selected>只練習目前選取的單字／片語</option>
+                <option value="all">全部單字（從目前這個開始依序往下）</option>
+                <option value="weak">⚡ 待加強弱點單字</option>
+                <option value="checked">☑️ 總表中我勾選的單字</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="shadow-list-loop">♾️ 清單循環（練習範圍有多個單字時）：</label>
+              <select id="shadow-list-loop" class="select-control">
+                <option value="0" selected>每個單字練完就換下一個，整份練完一輪即停止</option>
+                <option value="1">整份清單練完後從頭再循環（無限）</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="shadow-order">🔀 清單順序：</label>
+              <select id="shadow-order" class="select-control">
+                <option value="seq" selected>依清單順序</option>
+                <option value="random">隨機打亂順序</option>
+              </select>
+            </div>
+
             <div class="setting-item">
               <label for="shadow-play-target">🔊 播放內容模式：</label>
               <select id="shadow-play-target" class="select-control">
@@ -244,12 +271,15 @@
             </div>
 
             <div class="setting-item">
-              <label for="shadow-repeat-count">🔁 重複播放次數：</label>
+              <label for="shadow-repeat-count">🔁 每個單字重複播放次數：</label>
               <select id="shadow-repeat-count" class="select-control">
-                <option value="3">連續 3 次 (基礎適應)</option>
-                <option value="5" selected>連續 5 次 (黃金記憶推薦)</option>
-                <option value="10">連續 10 次 (強化直覺)</option>
-                <option value="999">無限循環播放 (直到手動停止)</option>
+                <option value="1">1 次</option>
+                <option value="2">2 次</option>
+                <option value="3">3 次 (基礎適應)</option>
+                <option value="5" selected>5 次 (黃金記憶推薦)</option>
+                <option value="10">10 次 (強化直覺)</option>
+                <option value="20">20 次 (肌肉記憶)</option>
+                <option value="999">無限重複（直到按停止）</option>
               </select>
             </div>
 
@@ -395,11 +425,20 @@
           </div>
         </div>
 
+        <!-- 勾選後的批次操作 -->
+        <div class="table-bulk-bar">
+          <span>☑️ 已勾選 <strong id="table-checked-count">0</strong> 個</span>
+          <button id="btn-shadow-checked" class="btn-primary btn-sm" type="button">🎧 跟讀勾選的單字</button>
+          <button id="btn-delete-checked" class="btn-ghost btn-sm btn-danger-text" type="button">🗑️ 刪除勾選的單字</button>
+          <button id="btn-delete-mastered" class="btn-ghost btn-sm btn-danger-text" type="button">🧹 一鍵刪除全部「已熟記」單字</button>
+        </div>
+
         <!-- 單字總表 Table -->
         <div class="table-responsive">
           <table class="vocab-table">
             <thead>
               <tr>
+                <th style="width: 40px; text-align:center;"><input type="checkbox" id="table-check-all" title="全選／取消全選目前列表" aria-label="全選" /></th>
                 <th style="width: 50px;">#</th>
                 <th style="width: 170px;">單字 (Word)</th>
                 <th style="width: 140px;">音標 (Phonetic)</th>
@@ -670,7 +709,7 @@
   </div>
 
   <script src="qrcode.js"></script>
-  <script src="data.js?v=2.5"></script>
-  <script src="app.js?v=2.5"></script>
+  <script src="data.js?v=3.0"></script>
+  <script src="app.js?v=3.0"></script>
 </body>
 </html>

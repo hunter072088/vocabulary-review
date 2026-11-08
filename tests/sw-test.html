@@ -1,0 +1,38 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SW update test</title></head>
+<body>
+<pre id="result">RUNNING</pre>
+<script>
+// 模擬舊版 cache-first SW 留下的過期快取，驗證新版 sw.js 會清除並讓畫面換成最新版。
+(async () => {
+  const out = [];
+  const c = (n, ok, x) => out.push((ok ? 'PASS ' : 'FAIL ') + n + (x ? '  -> ' + x : ''));
+  const show = () => { const t = 'DONE\n' + out.join('\n') + '\nSUMMARY failed=' + out.filter(r => r.startsWith('FAIL')).length + ' total=' + out.length; document.getElementById('result').textContent = t; t.split('\n').forEach(l => console.log('SWTEST ' + l)); };
+  try {
+    const phase = sessionStorage.getItem('swphase');
+    if (!phase) {
+      for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+      for (const k of await caches.keys()) await caches.delete(k);
+      const old = await caches.open('vocabbuddy-v2');
+      await old.put('/index.html', new Response('<html>STALE-OLD-INDEX</html>', {headers: {'Content-Type': 'text/html'}}));
+      sessionStorage.setItem('swphase', '1');
+      await navigator.serviceWorker.register('/sw.js');
+      await new Promise(r => setTimeout(r, 15000));
+      out.push('FAIL 新版 SW 啟用後沒有讓已開啟的頁面重新載入');
+      show();
+    } else {
+      sessionStorage.removeItem('swphase');
+      const keys = await caches.keys();
+      c('舊快取 vocabbuddy-v2 已被清除', !keys.includes('vocabbuddy-v2'), keys.join(','));
+      c('新快取 vocabbuddy-v3 已建立', keys.includes('vocabbuddy-v3'), keys.join(','));
+      const txt = await (await fetch('/index.html')).text();
+      c('取得的是最新 index.html（網路優先，不是舊快取）', txt.includes('shadow-scope') && !txt.includes('STALE-OLD-INDEX'));
+      c('頁面受新 Service Worker 控制', !!navigator.serviceWorker.controller);
+      const app = await (await fetch('/app.js?v=3.0')).text();
+      c('app.js 與 index.html 同為新版（不會新舊混搭）', app.includes('startShadowLoop') && txt.includes('app.js?v=3.0'));
+      show();
+    }
+  } catch (e) { out.push('FAIL 例外 ' + e); show(); }
+})();
+</script>
+</body></html>

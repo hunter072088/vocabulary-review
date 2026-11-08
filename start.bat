@@ -7,3 +7,4 @@ echo   正在啟動本地伺服器 (Zero-Dependency Local Server)...
 echo ========================================================
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-server.ps1"
 pause
+

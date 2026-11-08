@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VocabBuddy — 英語全方位學習與測驗系統</title>
-  <meta name="description" content="專為工程、商務與職涯打造的互動式英語單字閃卡、閱讀理解、雙人聽力跟讀與弱點測驗系統。" />
+  <meta name="description" content="專為工程、商務與職涯打造的互動式英語單字閃卡、閱讀理解、雙人聽力跟讀、單字總表管理與弱點測驗系統。" />
 
   <script>
     // 確保 GitHub Pages 子目錄網址結尾有斜線，讓 manifest.json 與 sw.js 正確解析
@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2.0" />
+  <link rel="stylesheet" href="styles.css?v=2.5" />
 </head>
 <body>
   <!-- LINE / FB 內建瀏覽器偵測提醒橫幅 -->
@@ -60,7 +60,7 @@
             <h1 class="brand-title">VocabBuddy 英語全方位學習系統</h1>
             <span class="pwa-ready-badge">PWA App</span>
           </div>
-          <p class="brand-subtitle">半導體製程・商務合約・職涯培訓 59 核心字彙</p>
+          <p class="brand-subtitle">半導體製程・商務合約・職涯培訓・自主字彙管理庫</p>
         </div>
       </div>
 
@@ -84,20 +84,23 @@
       </div>
     </div>
 
-    <!-- 四大模組切換 Tabs -->
+    <!-- 五大模組切換 Tabs -->
     <div class="container nav-tabs-wrapper">
       <nav class="nav-tabs" role="tablist">
         <button class="nav-tab active" data-tab="vocab" role="tab">
           <span class="tab-num">1</span> 核心字彙解析 & 閃卡
         </button>
-        <button class="nav-tab" data-tab="reading" role="tab">
-          <span class="tab-num">2</span> 閱讀理解挑戰
-        </button>
         <button class="nav-tab" data-tab="listening" role="tab">
-          <span class="tab-num">3</span> 聽力與口說訓練
+          <span class="tab-num">2</span> 聽力與跟讀訓練 (Shadowing)
+        </button>
+        <button class="nav-tab" data-tab="table" role="tab">
+          <span class="tab-num">3</span> 📋 單字總表管理與匯入
+        </button>
+        <button class="nav-tab" data-tab="reading" role="tab">
+          <span class="tab-num">4</span> 閱讀理解挑戰
         </button>
         <button class="nav-tab" data-tab="quiz" role="tab">
-          <span class="tab-num">4</span> 綜合測驗中心
+          <span class="tab-num">5</span> 綜合測驗中心
         </button>
       </nav>
     </div>
@@ -119,11 +122,12 @@
 
         <div class="filter-bar">
           <div class="filter-group" id="category-filters">
-            <button class="chip active" data-cat="all">全部 (59)</button>
-            <button class="chip" data-cat="engineering">🔬 製程與工程 (21)</button>
-            <button class="chip" data-cat="business">💼 商務與管理 (24)</button>
-            <button class="chip" data-cat="career">🎓 培訓與職涯 (11)</button>
-            <button class="chip" data-cat="idiom">💬 口語片語 (3)</button>
+            <button class="chip active" data-cat="all">全部 (<span id="cat-count-all">59</span>)</button>
+            <button class="chip" data-cat="engineering">🔬 製程與工程</button>
+            <button class="chip" data-cat="business">💼 商務與管理</button>
+            <button class="chip" data-cat="career">🎓 培訓與職涯</button>
+            <button class="chip" data-cat="idiom">💬 口語片語</button>
+            <button class="chip" data-cat="custom">✨ 自訂新增</button>
             <button class="chip chip-weak" data-cat="weak">⚡ 待加強弱點本 (<span id="weak-count-chip">0</span>)</button>
             <button class="chip chip-mastered" data-cat="mastered">✅ 已熟記 (<span id="mastered-count-chip">0</span>)</button>
           </div>
@@ -176,60 +180,138 @@
       </div>
     </section>
 
-    <!-- ==================== 模組 2：閱讀理解挑戰 ==================== -->
-    <section id="tab-reading" class="tab-panel">
-      <div class="section-grid">
-        <div class="card reading-article-card">
-          <div class="card-header-flex">
-            <div>
-              <span class="section-badge">Reading Comprehension</span>
-              <h2 id="reading-title" class="card-title"></h2>
-            </div>
-            <div class="reading-actions">
-              <button id="btn-read-article" class="btn-audio">🔊 朗讀全文</button>
-              <button id="btn-toggle-reading-zh" class="btn-secondary btn-sm">顯示/隱藏中譯</button>
-            </div>
-          </div>
-          <p class="helper-banner">💡 提示：點擊文章中任何 <strong>藍色高亮單字</strong>，即可直接聽發音並查看中文解析與記憶技巧！</p>
-          <div id="reading-content" class="reading-body"></div>
-        </div>
-
-        <div class="card reading-quiz-card">
-          <span class="section-badge">Comprehension Check</span>
-          <h3 class="card-title">閱讀理解測驗（3 題）</h3>
-          <div id="reading-questions-container"></div>
-          <div class="quiz-actions-row">
-            <button id="btn-check-reading" class="btn-primary">批改閱讀測驗</button>
-            <button id="btn-reset-reading" class="btn-ghost">重做</button>
-          </div>
-          <div id="reading-score-banner" class="score-banner hidden"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== 模組 3：聽力與口說訓練腳本 ==================== -->
+    <!-- ==================== 模組 2：聽力與跟讀訓練 (Shadowing & Loop) ==================== -->
     <section id="tab-listening" class="tab-panel">
-      <div class="card listening-header-card">
+      <!-- 需求 1：單字/片語專屬循環跟讀播放器 (Word/Phrase Shadowing Station) -->
+      <div class="card word-shadow-card">
         <div class="card-header-flex">
           <div>
-            <span class="section-badge">Listening & Shadowing Studio</span>
-            <h2 class="card-title">🎙️ 雙人情境對話：無塵室製程異常檢討與改善</h2>
+            <span class="section-badge">Feature 1: Word & Phrase Shadowing</span>
+            <h2 class="card-title">🎧 單獨選取單字／片語：反覆連續播放與跟讀</h2>
+            <p class="text-muted">可直接挑選指定單字或片語，自訂循環次數、跟讀停頓時間與語速，建立自然肌肉記憶！</p>
+          </div>
+        </div>
+
+        <div class="shadow-player-layout">
+          <!-- 左側單字選取與播放控制器 -->
+          <div class="shadow-player-left">
+            <div class="player-select-row">
+              <label for="shadow-word-select"><strong>📌 選擇練習目標：</strong></label>
+              <select id="shadow-word-select" class="select-control shadow-word-dropdown"></select>
+            </div>
+
+            <!-- 當前選定單字大卡片 -->
+            <div class="shadow-target-display" id="shadow-target-box">
+              <div class="shadow-badge-row">
+                <span id="shadow-pos" class="pos-tag">n.</span>
+                <span id="shadow-cat" class="badge">製程與工程</span>
+                <span id="shadow-status-tag" class="status-indicator"></span>
+              </div>
+              <div class="shadow-big-word-row">
+                <h3 id="shadow-word" class="shadow-big-word">traceability</h3>
+                <span id="shadow-phonetic" class="shadow-phonetic">/ˌtreɪ.səˈbɪl.ə.t̬i/</span>
+              </div>
+              <div id="shadow-zh" class="shadow-zh">可追溯性</div>
+
+              <!-- 例句區 -->
+              <div class="shadow-example-box">
+                <div class="shadow-ex-header">
+                  <span class="ex-label">例句跟讀：</span>
+                  <button id="shadow-speak-ex-btn" class="btn-audio btn-sm" type="button">🔈 單聽例句</button>
+                </div>
+                <p id="shadow-ex-en" class="shadow-ex-en">Batch traceability is critical in wafer fabrication to track down defective materials.</p>
+                <p id="shadow-ex-zh" class="shadow-ex-zh">批次可追溯性在晶圓製造中至關重要，以便追查缺陷材料。</p>
+              </div>
+
+              <!-- 播放進度與狀態指示燈 -->
+              <div class="shadow-loop-status" id="shadow-loop-status">
+                <span class="status-dot"></span>
+                <span id="shadow-status-text">待機中，隨時可開始練習</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右側參數控制面板 -->
+          <div class="shadow-player-right">
+            <h4 class="settings-title">⚙️ 跟讀與循環播放設定</h4>
+            <div class="setting-item">
+              <label for="shadow-play-target">🔊 播放內容模式：</label>
+              <select id="shadow-play-target" class="select-control">
+                <option value="word" selected>只重複朗讀單字 / 片語</option>
+                <option value="both">單字 ＋ 情境例句 一起讀</option>
+                <option value="example">只重複朗讀情境例句</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="shadow-repeat-count">🔁 重複播放次數：</label>
+              <select id="shadow-repeat-count" class="select-control">
+                <option value="3">連續 3 次 (基礎適應)</option>
+                <option value="5" selected>連續 5 次 (黃金記憶推薦)</option>
+                <option value="10">連續 10 次 (強化直覺)</option>
+                <option value="999">無限循環播放 (直到手動停止)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="shadow-interval">⏳ 每次播放間停頓（供開口跟讀）：</label>
+              <select id="shadow-interval" class="select-control">
+                <option value="1.0">1.0 秒 (緊湊跟讀)</option>
+                <option value="1.8" selected>1.8 秒 (標準跟讀練習)</option>
+                <option value="2.5">2.5 秒 (充裕複述時間)</option>
+                <option value="3.5">3.5 秒 (完整長句複述)</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label for="shadow-rate">⚡ 語速控制：</label>
+              <select id="shadow-rate" class="select-control">
+                <option value="0.75">0.75x (慢速磨耳朵)</option>
+                <option value="0.9">0.90x (微慢清晰)</option>
+                <option value="1.0" selected>1.0x (標準美語語速)</option>
+                <option value="1.15">1.15x (流暢挑戰)</option>
+              </select>
+            </div>
+
+            <!-- 控制按鈕 -->
+            <div class="shadow-btn-row">
+              <button id="shadow-start-btn" class="btn-primary btn-lg" type="button">
+                ▶️ 開始連續循環跟讀
+              </button>
+              <button id="shadow-stop-btn" class="btn-secondary btn-lg" type="button">
+                ⏹️ 停止播放
+              </button>
+            </div>
+
+            <div class="shadow-nav-btns">
+              <button id="shadow-prev-btn" class="btn-ghost" type="button">⏮️ 上一個單字</button>
+              <button id="shadow-next-btn" class="btn-ghost" type="button">⏭️ 下一個單字</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 原有：雙人情境對話（無塵室對話與聽力克漏字填空） -->
+      <div class="card listening-header-card mt-4">
+        <div class="card-header-flex">
+          <div>
+            <span class="section-badge">Dialogue Shadowing Studio</span>
+            <h3 class="card-title">🎙️ 雙人情境短文對話：無塵室製程異常檢討與改善</h3>
             <p class="text-muted">角色：<strong>Jamie</strong>（初階製程工程師） ＆ <strong>Alex</strong>（資深導師 Mentor）</p>
           </div>
           <div class="audio-studio-controls">
-            <button id="btn-play-dialogue" class="btn-primary">▶️ 連續播放整段對話</button>
-            <button id="btn-stop-dialogue" class="btn-secondary">⏹️ 停止</button>
+            <button id="btn-play-dialogue" class="btn-primary" type="button">▶️ 連續播放整段對話</button>
+            <button id="btn-stop-dialogue" class="btn-secondary" type="button">⏹️ 停止</button>
             <select id="speech-rate" class="select-control" aria-label="語速調整">
               <option value="0.75">🐢 慢速跟讀 (0.75x)</option>
               <option value="0.9">🚶 稍慢清晰 (0.90x)</option>
               <option value="1" selected>⚡ 標準語速 (1.0x)</option>
               <option value="1.15">🚀 挑戰快語速 (1.15x)</option>
             </select>
-            <button id="btn-toggle-dialogue-zh" class="btn-ghost btn-sm">切換中文翻譯</button>
+            <button id="btn-toggle-dialogue-zh" class="btn-ghost btn-sm" type="button">切換中文翻譯</button>
           </div>
         </div>
 
-        <!-- Shadowing 發音重點提示 -->
         <div class="shadowing-tips-grid">
           <div class="tip-box">
             <strong>🔗 片語連音技巧 (Linking)</strong>
@@ -246,7 +328,6 @@
         </div>
       </div>
 
-      <!-- 對話腳本區 -->
       <div id="dialogue-list" class="dialogue-container"></div>
 
       <!-- 聽力填空練習區 -->
@@ -258,15 +339,115 @@
             <p class="text-muted">點擊每題的「播放音檔」按鈕，聽音填入正確的核心單字或片語。</p>
           </div>
           <div class="quiz-actions-row">
-            <button id="btn-check-dictation" class="btn-primary">檢核聽力填空</button>
-            <button id="btn-show-dictation-ans" class="btn-secondary">直接看解答</button>
+            <button id="btn-check-dictation" class="btn-primary" type="button">檢核聽力填空</button>
+            <button id="btn-show-dictation-ans" class="btn-secondary" type="button">直接看解答</button>
           </div>
         </div>
         <div id="dictation-container" class="dictation-list"></div>
       </div>
     </section>
 
-    <!-- ==================== 模組 4：綜合測驗中心 ==================== -->
+    <!-- ==================== 模組 3：單字總表管理與匯入 (Vocabulary Table Management) ==================== -->
+    <section id="tab-table" class="tab-panel">
+      <!-- 需求 2：單字總表管理控制台 (Table Management) -->
+      <div class="card">
+        <div class="card-header-flex">
+          <div>
+            <span class="section-badge">Feature 2: Full Vocabulary Table & Import</span>
+            <h2 class="card-title">📋 單字總表管理與批次匯入中心</h2>
+            <p class="text-muted">支援隨時<strong>匯入新單字</strong>、<strong>刪除熟悉/不需要的單字</strong>、<strong>快速篩選</strong>與<strong>匯出備份 (JSON/CSV)</strong>。</p>
+          </div>
+          <div class="table-actions-top">
+            <button id="btn-open-import-modal" class="btn-primary" type="button">
+              📥 批次匯入新單字
+            </button>
+            <button id="btn-open-add-single" class="btn-secondary" type="button">
+              ➕ 新增單筆單字
+            </button>
+            <button id="btn-export-vocab" class="btn-ghost" type="button">
+              💾 匯出備份 (JSON)
+            </button>
+            <button id="btn-restore-defaults" class="btn-ghost" type="button" title="重置為初始 59 個工程與商務單字">
+              🔄 還原預設單字庫
+            </button>
+          </div>
+        </div>
+
+        <!-- 總表篩選工具列 -->
+        <div class="table-filter-bar">
+          <div class="table-search-box">
+            <input type="text" id="table-search-input" placeholder="過濾總表：搜尋英文、中文、詞性或例句..." />
+          </div>
+          <div class="table-category-select">
+            <select id="table-cat-filter" class="select-control">
+              <option value="all">所有類別 (全部)</option>
+              <option value="engineering">🔬 製程與工程</option>
+              <option value="business">💼 商務與管理</option>
+              <option value="career">🎓 培訓與職涯</option>
+              <option value="idiom">💬 口語片語</option>
+              <option value="custom">✨ 自訂新增</option>
+              <option value="mastered">✅ 已熟記單字</option>
+              <option value="weak">⚡ 待加強弱點</option>
+            </select>
+          </div>
+          <div class="table-stats-info">
+            顯示 <strong id="table-showing-count">59</strong> / 總計 <strong id="table-total-count">59</strong> 個單字
+          </div>
+        </div>
+
+        <!-- 單字總表 Table -->
+        <div class="table-responsive">
+          <table class="vocab-table">
+            <thead>
+              <tr>
+                <th style="width: 50px;">#</th>
+                <th style="width: 170px;">單字 (Word)</th>
+                <th style="width: 140px;">音標 (Phonetic)</th>
+                <th style="width: 70px;">詞性</th>
+                <th style="width: 160px;">中文釋義</th>
+                <th style="width: 110px;">類別</th>
+                <th>情境例句與中文</th>
+                <th style="width: 160px; text-align: center;">操作管理</th>
+              </tr>
+            </thead>
+            <tbody id="vocab-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 模組 4：閱讀理解挑戰 ==================== -->
+    <section id="tab-reading" class="tab-panel">
+      <div class="section-grid">
+        <div class="card reading-article-card">
+          <div class="card-header-flex">
+            <div>
+              <span class="section-badge">Reading Comprehension</span>
+              <h2 id="reading-title" class="card-title"></h2>
+            </div>
+            <div class="reading-actions">
+              <button id="btn-read-article" class="btn-audio" type="button">🔊 朗讀全文</button>
+              <button id="btn-toggle-reading-zh" class="btn-secondary btn-sm" type="button">顯示/隱藏中譯</button>
+            </div>
+          </div>
+          <p class="helper-banner">💡 提示：點擊文章中任何 <strong>藍色高亮單字</strong>，即可直接聽發音並查看中文解析與記憶技巧！</p>
+          <div id="reading-content" class="reading-body"></div>
+        </div>
+
+        <div class="card reading-quiz-card">
+          <span class="section-badge">Comprehension Check</span>
+          <h3 class="card-title">閱讀理解測驗（3 題）</h3>
+          <div id="reading-questions-container"></div>
+          <div class="quiz-actions-row">
+            <button id="btn-check-reading" class="btn-primary" type="button">批改閱讀測驗</button>
+            <button id="btn-reset-reading" class="btn-ghost" type="button">重做</button>
+          </div>
+          <div id="reading-score-banner" class="score-banner hidden"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 模組 5：綜合測驗中心 ==================== -->
     <section id="tab-quiz" class="tab-panel">
       <div class="card quiz-control-banner">
         <div class="card-header-flex">
@@ -276,9 +457,9 @@
             <p class="text-muted">支援「標準第一輪隨堂考」、「全題庫隨機出題」與「只考待加強弱點單字」！答錯題目會自動收錄至「待加強弱點本」。</p>
           </div>
           <div class="quiz-mode-buttons">
-            <button id="btn-quiz-standard" class="btn-secondary">📘 載入標準隨堂考卷</button>
-            <button id="btn-quiz-random" class="btn-primary">🎲 隨機生成新一輪測驗</button>
-            <button id="btn-quiz-weak" class="btn-warning">⚡ 專攻「待加強」單字測驗</button>
+            <button id="btn-quiz-standard" class="btn-secondary" type="button">📘 載入標準隨堂考卷</button>
+            <button id="btn-quiz-random" class="btn-primary" type="button">🎲 隨機生成新一輪測驗</button>
+            <button id="btn-quiz-weak" class="btn-warning" type="button">⚡ 專攻「待加強」單字測驗</button>
           </div>
         </div>
       </div>
@@ -305,21 +486,110 @@
       </div>
 
       <div class="quiz-submit-bar">
-        <button id="btn-submit-quiz" class="btn-primary btn-lg">🎯 送出交卷並查看詳細解析</button>
-        <button id="btn-reveal-quiz" class="btn-secondary btn-lg">👁️ 展開/收合全部解答</button>
+        <button id="btn-submit-quiz" class="btn-primary btn-lg" type="button">🎯 送出交卷並查看詳細解析</button>
+        <button id="btn-reveal-quiz" class="btn-secondary btn-lg" type="button">👁️ 展開/收合全部解答</button>
       </div>
     </section>
   </main>
 
+  <!-- 批次匯入新單字 Modal -->
+  <div id="import-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width: 640px;">
+      <button class="modal-close-btn" type="button" onclick="document.getElementById('import-modal').classList.add('hidden')">&times;</button>
+      <span class="section-badge">Batch Import</span>
+      <h3 class="card-title" style="margin-top: 6px;">📥 批次匯入新單字清單</h3>
+      <p class="text-muted" style="margin-bottom: 12px;">支援多種格式貼上，系統自動辨識！每行一筆，例如：<br/>
+        <code>單字 [Tab或空格] 中文意思</code> 或 <code>單字, 中文意思, 詞性, 例句</code>
+      </p>
+
+      <textarea id="import-textarea" class="import-textarea" placeholder="範例一（最簡易）：&#10;resilience 韌性&#10;scalability 可擴展性&#10;breakthrough 突破&#10;&#10;範例二（Tab / 包含詞性）：&#10;mitigate&#9;v.&#9;減輕、緩解&#10;benchmark&#9;n.&#9;基準、參照點"></textarea>
+
+      <div class="import-options-row">
+        <label>
+          <strong>設定分類：</strong>
+          <select id="import-cat-select" class="select-control" style="margin-left: 6px;">
+            <option value="custom" selected>✨ 自訂新增</option>
+            <option value="engineering">🔬 製程與工程</option>
+            <option value="business">💼 商務與管理</option>
+            <option value="career">🎓 培訓與職涯</option>
+            <option value="idiom">💬 口語片語</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="modal-footer-actions">
+        <button class="btn-secondary" type="button" onclick="document.getElementById('import-modal').classList.add('hidden')">取消</button>
+        <button id="btn-submit-import" class="btn-primary" type="button">🚀 確認解析並匯入庫存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新增/編輯單筆單字 Modal -->
+  <div id="add-word-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width: 540px;">
+      <button class="modal-close-btn" type="button" onclick="document.getElementById('add-word-modal').classList.add('hidden')">&times;</button>
+      <span class="section-badge">Add Word</span>
+      <h3 class="card-title" id="add-modal-title" style="margin-top: 6px;">➕ 新增單筆單字</h3>
+
+      <div class="form-grid" style="display: grid; gap: 12px; margin-top: 14px;">
+        <div>
+          <label><strong>英文單字 (Word)*：</strong></label>
+          <input type="text" id="add-input-word" class="form-control-input" placeholder="例如：throughput" />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <label><strong>音標 (可選)：</strong></label>
+            <input type="text" id="add-input-phonetic" class="form-control-input" placeholder="/ˈθruː.pʊt/" />
+          </div>
+          <div>
+            <label><strong>詞性 (POS)*：</strong></label>
+            <input type="text" id="add-input-pos" class="form-control-input" placeholder="n. / v. / adj." value="n." />
+          </div>
+        </div>
+        <div>
+          <label><strong>中文釋義*：</strong></label>
+          <input type="text" id="add-input-zh" class="form-control-input" placeholder="例如：吞吐量、生產能力" />
+        </div>
+        <div>
+          <label><strong>分類：</strong></label>
+          <select id="add-input-category" class="select-control" style="width: 100%;">
+            <option value="custom" selected>✨ 自訂新增</option>
+            <option value="engineering">🔬 製程與工程</option>
+            <option value="business">💼 商務與管理</option>
+            <option value="career">🎓 培訓與職涯</option>
+            <option value="idiom">💬 口語片語</option>
+          </select>
+        </div>
+        <div>
+          <label><strong>英文例句 (可選)：</strong></label>
+          <textarea id="add-input-example" class="form-control-textarea" placeholder="例如：We optimized the process to maximize overall wafer throughput."></textarea>
+        </div>
+        <div>
+          <label><strong>例句中譯 (可選)：</strong></label>
+          <input type="text" id="add-input-example-zh" class="form-control-input" placeholder="我們優化了製程以最大化晶圓吞吐量。" />
+        </div>
+        <div>
+          <label><strong>記憶小幫手 (可選)：</strong></label>
+          <input type="text" id="add-input-memory" class="form-control-input" placeholder="through（穿過）+ put（放）→ 單位時間通過的量。" />
+        </div>
+      </div>
+
+      <div class="modal-footer-actions" style="margin-top: 16px;">
+        <button class="btn-secondary" type="button" onclick="document.getElementById('add-word-modal').classList.add('hidden')">取消</button>
+        <button id="btn-save-single-word" class="btn-primary" type="button">儲存單字</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 點擊單字彈出小卡 Modal -->
   <div id="word-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal-card">
-      <button id="modal-close" class="modal-close-btn" aria-label="關閉">&times;</button>
+      <button id="modal-close" class="modal-close-btn" type="button" aria-label="關閉">&times;</button>
       <span id="modal-cat" class="badge"></span>
       <div class="modal-word-row">
         <h3 id="modal-word"></h3>
         <span id="modal-pos" class="pos-tag"></span>
-        <button id="modal-speak" class="btn-audio btn-sm">🔊 發音</button>
+        <button id="modal-speak" class="btn-audio btn-sm" type="button">🔊 發音</button>
       </div>
       <p id="modal-phonetic" class="fc-phonetic"></p>
       <h4 id="modal-zh" class="modal-zh"></h4>
@@ -332,8 +602,8 @@
         <p id="modal-memory"></p>
       </div>
       <div class="modal-footer-actions">
-        <button id="modal-btn-weak" class="btn-warning btn-sm">⚡ 標記待加強</button>
-        <button id="modal-btn-mastered" class="btn-success btn-sm">✅ 標記已熟記</button>
+        <button id="modal-btn-weak" class="btn-warning btn-sm" type="button">⚡ 標記待加強</button>
+        <button id="modal-btn-mastered" class="btn-success btn-sm" type="button">✅ 標記已熟記</button>
       </div>
     </div>
   </div>
@@ -400,7 +670,7 @@
   </div>
 
   <script src="qrcode.js"></script>
-  <script src="data.js?v=2.0"></script>
-  <script src="app.js?v=2.0"></script>
+  <script src="data.js?v=2.5"></script>
+  <script src="app.js?v=2.5"></script>
 </body>
 </html>

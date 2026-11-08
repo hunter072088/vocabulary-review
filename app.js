@@ -1,5 +1,9 @@
 // 狀態管理 (儲存於 localStorage)
 const STORAGE_KEY = "vocab_app_progress_v1";
+const CUSTOM_VOCAB_KEY = "vocab_app_custom_data_v2";
+
+// 當前運行單字庫 (由預設 VOCAB_DATA + 自訂新增/刪除動態組合)
+let activeVocabList = [];
 
 let appState = {
   masteredIds: [],
@@ -12,13 +16,24 @@ let appState = {
   showDialogueZh: true,
   activeQuizMC: [],
   activeQuizFIB: [],
-  activeModalWordId: null
+  activeModalWordId: null,
+
+  // 需求 1: Shadowing 單字跟讀狀態
+  shadowSelectedWordId: null,
+  shadowLoopTimer: null,
+  shadowIsPlaying: false,
+  shadowCurrentIteration: 0,
+  shadowTotalIterations: 5,
+
+  // 需求 2: 總表篩選狀態
+  tableCategory: "all",
+  tableSearch: ""
 };
 
 // 全域 PWA 安裝事件暫存
 window.deferredInstallPrompt = null;
 
-// 監聽 Chrome / Edge / Android 原生安裝事件 (放在最外層避免錯過時機)
+// 監聽 Chrome / Edge / Android 原生安裝事件
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   window.deferredInstallPrompt = e;
@@ -45,10 +60,8 @@ window.addEventListener("appinstalled", () => {
 
 // 頂部「📱 安裝 APP」按鈕點擊處理
 window.handleHeaderInstallClick = async function () {
-  // 先開啟安裝教學與 QR Code 視窗，讓使用者隨時看得到反應與手機 QR Code
   window.openInstallModal();
 
-  // 如果瀏覽器已經準備好原生安裝視窗，同時直接彈出系統安裝詢問框！
   if (window.deferredInstallPrompt) {
     try {
       window.deferredInstallPrompt.prompt();
@@ -68,13 +81,11 @@ window.openInstallModal = function () {
   const modal = document.getElementById("install-modal");
   if (!modal) return;
 
-  // 檢查是否為 file:// 協定
   const fileWarn = document.getElementById("file-protocol-warning");
   if (fileWarn) {
     fileWarn.classList.toggle("hidden", location.protocol !== "file:");
   }
 
-  // 產生離線 SVG QR Code (優先使用內建 createQRCodeSVG)
   const publicUrl = "https://hunter072088.github.io/vocabulary-review/";
   const urlInput = document.getElementById("install-url-input");
   if (urlInput) urlInput.value = publicUrl;
@@ -133,7 +144,33 @@ window.copyInstallUrl = function () {
   });
 };
 
-// 載入儲存的進度
+// ==================== 資料載入與持久化 (支援匯入/刪除) ====================
+function initVocabData() {
+  try {
+    const saved = localStorage.getItem(CUSTOM_VOCAB_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        activeVocabList = parsed;
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn("無法讀取自訂單字庫:", e);
+  }
+  // 預設深拷貝原有的 VOCAB_DATA
+  activeVocabList = JSON.parse(JSON.stringify(VOCAB_DATA));
+}
+
+function saveVocabData() {
+  try {
+    localStorage.setItem(CUSTOM_VOCAB_KEY, JSON.stringify(activeVocabList));
+  } catch (e) {
+    console.warn("無法寫入自訂單字庫:", e);
+  }
+  updateHeaderStats();
+}
+
 function loadProgress() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -143,7 +180,7 @@ function loadProgress() {
       appState.weakIds = Array.isArray(parsed.weakIds) ? parsed.weakIds : [];
     }
   } catch (e) {
-    console.warn("無法讀取 localStorage:", e);
+    console.warn("無法讀取進度:", e);
   }
 }
 
@@ -157,17 +194,20 @@ function saveProgress() {
       })
     );
   } catch (e) {
-    console.warn("無法寫入 localStorage:", e);
+    console.warn("無法寫入進度:", e);
   }
   updateHeaderStats();
 }
 
 function updateHeaderStats() {
-  document.getElementById("stat-total").textContent = VOCAB_DATA.length;
+  const total = activeVocabList.length;
+  document.getElementById("stat-total").textContent = total;
   document.getElementById("stat-mastered").textContent = appState.masteredIds.length;
   document.getElementById("stat-weak").textContent = appState.weakIds.length;
   document.getElementById("weak-count-chip").textContent = appState.weakIds.length;
   document.getElementById("mastered-count-chip").textContent = appState.masteredIds.length;
+  const catAllEl = document.getElementById("cat-count-all");
+  if (catAllEl) catAllEl.textContent = total;
 }
 
 // 語音合成 (Web Speech API)
@@ -194,6 +234,10 @@ function speakText(text, rate = 1.0, pitch = 1.0, onEndCallback = null) {
 
   if (onEndCallback) {
     utter.onend = onEndCallback;
+    utter.onerror = () => {
+      // 避免中斷時卡住回調
+      onEndCallback();
+    };
   }
   window.speechSynthesis.speak(utter);
 }
@@ -210,6 +254,8 @@ function toggleMastered(id) {
   }
   saveProgress();
   renderVocabSection();
+  renderVocabTable();
+  updateShadowWordTarget();
 }
 
 function toggleWeak(id, forceAdd = false) {
@@ -229,11 +275,13 @@ function toggleWeak(id, forceAdd = false) {
   }
   saveProgress();
   renderVocabSection();
+  renderVocabTable();
+  updateShadowWordTarget();
 }
 
-// 取得篩選後的單字清單
+// 取得篩選後的卡片清單
 function getFilteredVocab() {
-  return VOCAB_DATA.filter((item) => {
+  return activeVocabList.filter((item) => {
     if (appState.currentCategory === "weak" && !appState.weakIds.includes(item.id)) return false;
     if (appState.currentCategory === "mastered" && !appState.masteredIds.includes(item.id)) return false;
     if (
@@ -249,7 +297,7 @@ function getFilteredVocab() {
       const q = appState.searchQuery.toLowerCase().trim();
       const matchWord = item.word.toLowerCase().includes(q);
       const matchZh = item.zh.toLowerCase().includes(q);
-      const matchEx = item.example.toLowerCase().includes(q);
+      const matchEx = (item.example || "").toLowerCase().includes(q);
       return matchWord || matchZh || matchEx;
     }
     return true;
@@ -270,7 +318,7 @@ function renderVocabSection() {
       listView.innerHTML = `
         <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 40px;">
           <h3>找不到符合條件的單字</h3>
-          <p class="text-muted">請嘗試切換上方分類標籤或清除搜尋關鍵字。</p>
+          <p class="text-muted">請嘗試切換上方分類標籤或至「📋 單字總表」匯入新單字。</p>
         </div>
       `;
       return;
@@ -286,24 +334,27 @@ function renderVocabSection() {
             <div class="vc-top">
               <div class="vc-word-group">
                 <span class="vc-word">${item.word}</span>
-                <span class="pos-tag">${item.pos}</span>
-                <span class="vc-phonetic">${item.phonetic}</span>
+                <span class="pos-tag">${item.pos || "n."}</span>
+                <span class="vc-phonetic">${item.phonetic || ""}</span>
               </div>
-              <span class="badge cat-${item.category}">${item.categoryLabel}</span>
+              <span class="badge cat-${item.category || "custom"}">${item.categoryLabel || "自訂"}</span>
             </div>
             <div class="vc-zh">${item.zh}</div>
             <div class="vc-example">
-              <div class="en">${item.example}</div>
-              <div class="zh">${item.exampleZh}</div>
+              <div class="en">${item.example || "無例句"}</div>
+              <div class="zh">${item.exampleZh || ""}</div>
             </div>
-            <div class="vc-memory">
-              <strong>💡 記憶與搭配：</strong>${item.memory}
-            </div>
+            ${item.memory ? `
+              <div class="vc-memory">
+                <strong>💡 記憶與搭配：</strong>${item.memory}
+              </div>
+            ` : ""}
           </div>
           <div class="vc-actions">
             <div>
               <button class="btn-audio btn-sm" onclick="speakText('${item.word.replace(/'/g, "\\'")}')">🔊 單字</button>
-              <button class="btn-audio btn-sm" onclick="speakText('${item.example.replace(/'/g, "\\'")}', 0.95)">🔈 例句</button>
+              ${item.example ? `<button class="btn-audio btn-sm" onclick="speakText('${item.example.replace(/'/g, "\\'")}', 0.95)">🔈 例句</button>` : ""}
+              <button class="btn-secondary btn-sm" onclick="quickJumpToShadow(${item.id})" title="跳至跟讀訓練室反覆練習">🎧 跟讀</button>
             </div>
             <div class="vc-status-btns">
               <button class="btn-warning btn-sm ${isWeak ? "active" : ""}" onclick="toggleWeak(${item.id})">
@@ -341,17 +392,17 @@ function renderFlashcard(list) {
 
   document.getElementById("fc-counter").textContent = `${appState.flashcardIndex + 1} / ${list.length}`;
   const catEl = document.getElementById("fc-category");
-  catEl.textContent = item.categoryLabel;
-  catEl.className = `badge cat-${item.category}`;
+  catEl.textContent = item.categoryLabel || "自訂";
+  catEl.className = `badge cat-${item.category || "custom"}`;
 
   document.getElementById("fc-word").textContent = item.word;
-  document.getElementById("fc-phonetic").textContent = item.phonetic;
+  document.getElementById("fc-phonetic").textContent = item.phonetic || "";
   document.getElementById("fc-back-word").textContent = item.word;
-  document.getElementById("fc-pos").textContent = item.pos;
+  document.getElementById("fc-pos").textContent = item.pos || "n.";
   document.getElementById("fc-zh").textContent = item.zh;
-  document.getElementById("fc-example").textContent = item.example;
-  document.getElementById("fc-example-zh").textContent = item.exampleZh;
-  document.getElementById("fc-memory").textContent = item.memory;
+  document.getElementById("fc-example").textContent = item.example || "";
+  document.getElementById("fc-example-zh").textContent = item.exampleZh || "";
+  document.getElementById("fc-memory").textContent = item.memory || "多開口跟讀朗讀以強化大腦直覺連結。";
 
   const weakBtn = document.getElementById("fc-mark-weak");
   const mastBtn = document.getElementById("fc-mark-mastered");
@@ -359,12 +410,469 @@ function renderFlashcard(list) {
   mastBtn.textContent = appState.masteredIds.includes(item.id) ? "✅ 已標記熟記" : "✅ 標記已熟記";
 }
 
-// ==================== 模組 2：閱讀理解挑戰 ====================
+// ==================== 模組 2：單獨單字/片語 Shadowing 連續重複播放 ====================
+function initShadowingStation() {
+  populateShadowWordDropdown();
+  if (activeVocabList.length > 0 && !appState.shadowSelectedWordId) {
+    appState.shadowSelectedWordId = activeVocabList[0].id;
+  }
+  updateShadowWordTarget();
+
+  // 下拉選單切換單字
+  const selectEl = document.getElementById("shadow-word-select");
+  if (selectEl) {
+    selectEl.addEventListener("change", (e) => {
+      stopShadowLoop();
+      appState.shadowSelectedWordId = Number(e.target.value);
+      updateShadowWordTarget();
+    });
+  }
+
+  // 播放與停止按鈕
+  document.getElementById("shadow-start-btn").addEventListener("click", startShadowLoop);
+  document.getElementById("shadow-stop-btn").addEventListener("click", stopShadowLoop);
+  document.getElementById("shadow-speak-ex-btn").addEventListener("click", () => {
+    const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
+    if (item && item.example) {
+      speakText(item.example, parseFloat(document.getElementById("shadow-rate").value) || 1.0);
+    }
+  });
+
+  // 上下一個單字按鈕
+  document.getElementById("shadow-prev-btn").addEventListener("click", () => {
+    navigateShadowWord(-1);
+  });
+  document.getElementById("shadow-next-btn").addEventListener("click", () => {
+    navigateShadowWord(1);
+  });
+}
+
+function populateShadowWordDropdown() {
+  const selectEl = document.getElementById("shadow-word-select");
+  if (!selectEl) return;
+  const currentVal = appState.shadowSelectedWordId;
+
+  selectEl.innerHTML = activeVocabList
+    .map((item) => {
+      const isMastered = appState.masteredIds.includes(item.id);
+      const isWeak = appState.weakIds.includes(item.id);
+      const tag = isMastered ? " [已熟記]" : isWeak ? " [待加強]" : "";
+      return `<option value="${item.id}">${item.word} - ${item.zh}${tag}</option>`;
+    })
+    .join("");
+
+  if (currentVal && activeVocabList.some((v) => v.id === currentVal)) {
+    selectEl.value = currentVal;
+  } else if (activeVocabList.length > 0) {
+    selectEl.value = activeVocabList[0].id;
+    appState.shadowSelectedWordId = activeVocabList[0].id;
+  }
+}
+
+function updateShadowWordTarget() {
+  const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
+  if (!item) return;
+
+  const selectEl = document.getElementById("shadow-word-select");
+  if (selectEl && selectEl.value !== String(item.id)) {
+    selectEl.value = item.id;
+  }
+
+  document.getElementById("shadow-word").textContent = item.word;
+  document.getElementById("shadow-phonetic").textContent = item.phonetic || "";
+  document.getElementById("shadow-pos").textContent = item.pos || "n.";
+  document.getElementById("shadow-zh").textContent = item.zh;
+  document.getElementById("shadow-cat").textContent = item.categoryLabel || "自訂";
+  document.getElementById("shadow-cat").className = `badge cat-${item.category || "custom"}`;
+
+  const statusTag = document.getElementById("shadow-status-tag");
+  if (appState.masteredIds.includes(item.id)) {
+    statusTag.textContent = "✅ 已熟記";
+    statusTag.className = "status-indicator mastered";
+  } else if (appState.weakIds.includes(item.id)) {
+    statusTag.textContent = "⚡ 待加強弱點";
+    statusTag.className = "status-indicator weak";
+  } else {
+    statusTag.style.display = "none";
+  }
+
+  document.getElementById("shadow-ex-en").textContent = item.example || "（目前無設定專屬例句）";
+  document.getElementById("shadow-ex-zh").textContent = item.exampleZh || "";
+}
+
+function navigateShadowWord(direction) {
+  stopShadowLoop();
+  if (activeVocabList.length === 0) return;
+  let idx = activeVocabList.findIndex((v) => v.id === appState.shadowSelectedWordId);
+  if (idx === -1) idx = 0;
+  idx = (idx + direction + activeVocabList.length) % activeVocabList.length;
+  appState.shadowSelectedWordId = activeVocabList[idx].id;
+  updateShadowWordTarget();
+}
+
+function quickJumpToShadow(wordId) {
+  stopShadowLoop();
+  appState.shadowSelectedWordId = wordId;
+  // 切換至 Tab 2 (listening)
+  const tabBtn = document.querySelector('.nav-tab[data-tab="listening"]');
+  if (tabBtn) tabBtn.click();
+  updateShadowWordTarget();
+  const box = document.getElementById("shadow-target-box");
+  if (box) box.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function startShadowLoop() {
+  const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
+  if (!item) return;
+
+  stopShadowLoop();
+  appState.shadowIsPlaying = true;
+  appState.shadowCurrentIteration = 0;
+
+  const repeatVal = parseInt(document.getElementById("shadow-repeat-count").value, 10) || 5;
+  appState.shadowTotalIterations = repeatVal;
+
+  const targetBox = document.getElementById("shadow-target-box");
+  if (targetBox) targetBox.classList.add("is-looping");
+
+  runNextShadowIteration();
+}
+
+function runNextShadowIteration() {
+  if (!appState.shadowIsPlaying) return;
+
+  const item = activeVocabList.find((v) => v.id === appState.shadowSelectedWordId);
+  if (!item) {
+    stopShadowLoop();
+    return;
+  }
+
+  appState.shadowCurrentIteration++;
+  const mode = document.getElementById("shadow-play-target").value; // 'word' | 'both' | 'example'
+  const rate = parseFloat(document.getElementById("shadow-rate").value) || 1.0;
+  const intervalSec = parseFloat(document.getElementById("shadow-interval").value) || 1.8;
+
+  const iterText =
+    appState.shadowTotalIterations >= 999
+      ? `第 ${appState.shadowCurrentIteration} 次 (無限循環中)`
+      : `第 ${appState.shadowCurrentIteration} / ${appState.shadowTotalIterations} 次播放`;
+  document.getElementById("shadow-status-text").textContent = `🔊 正在播放：${item.word}（${iterText}）... 請仔細聽並跟讀！`;
+
+  let speechText = item.word;
+  if (mode === "example" && item.example) {
+    speechText = item.example;
+  } else if (mode === "both" && item.example) {
+    speechText = `${item.word}... ${item.example}`;
+  }
+
+  speakText(speechText, rate, 1.0, () => {
+    if (!appState.shadowIsPlaying) return;
+
+    if (
+      appState.shadowTotalIterations < 999 &&
+      appState.shadowCurrentIteration >= appState.shadowTotalIterations
+    ) {
+      document.getElementById("shadow-status-text").textContent = `🎉 已完成 ${appState.shadowTotalIterations} 次連續跟讀！開口記憶力滿點！`;
+      stopShadowLoop(false);
+      return;
+    }
+
+    document.getElementById("shadow-status-text").textContent = `⏳ 停頓 ${intervalSec} 秒留給你複述開口跟讀 (Shadowing)...`;
+    appState.shadowLoopTimer = setTimeout(() => {
+      runNextShadowIteration();
+    }, intervalSec * 1000);
+  });
+}
+
+function stopShadowLoop(resetStatus = true) {
+  appState.shadowIsPlaying = false;
+  if (appState.shadowLoopTimer) {
+    clearTimeout(appState.shadowLoopTimer);
+    appState.shadowLoopTimer = null;
+  }
+  window.speechSynthesis.cancel();
+
+  const targetBox = document.getElementById("shadow-target-box");
+  if (targetBox) targetBox.classList.remove("is-looping");
+
+  if (resetStatus) {
+    const statusText = document.getElementById("shadow-status-text");
+    if (statusText) statusText.textContent = "已停止播放，待機中";
+  }
+}
+
+// ==================== 模組 3：單字總表管理 (匯入、刪除、過濾、匯出) ====================
+function renderVocabTable() {
+  const tbody = document.getElementById("vocab-table-body");
+  if (!tbody) return;
+
+  const q = (appState.tableSearch || "").toLowerCase().trim();
+  const cat = appState.tableCategory || "all";
+
+  const filtered = activeVocabList.filter((item) => {
+    if (cat === "mastered" && !appState.masteredIds.includes(item.id)) return false;
+    if (cat === "weak" && !appState.weakIds.includes(item.id)) return false;
+    if (cat !== "all" && cat !== "mastered" && cat !== "weak" && item.category !== cat) return false;
+
+    if (q !== "") {
+      const matchWord = item.word.toLowerCase().includes(q);
+      const matchZh = item.zh.toLowerCase().includes(q);
+      const matchPos = (item.pos || "").toLowerCase().includes(q);
+      const matchEx = (item.example || "").toLowerCase().includes(q);
+      return matchWord || matchZh || matchPos || matchEx;
+    }
+    return true;
+  });
+
+  document.getElementById("table-showing-count").textContent = filtered.length;
+  document.getElementById("table-total-count").textContent = activeVocabList.length;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align: center; padding: 36px; color: var(--text-muted);">
+          🔍 沒有符合過濾條件的單字。可點擊上方「📥 批次匯入新單字」新增！
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtered
+    .map((item, idx) => {
+      const isMastered = appState.masteredIds.includes(item.id);
+      const isWeak = appState.weakIds.includes(item.id);
+      const rowClass = isMastered ? "row-mastered" : isWeak ? "row-weak" : "";
+      return `
+      <tr class="${rowClass}">
+        <td><strong>${idx + 1}</strong></td>
+        <td>
+          <div class="table-word-cell">
+            <span>${item.word}</span>
+            <button class="btn-audio btn-sm" onclick="speakText('${item.word.replace(/'/g, "\\'")}')" title="播放發音">🔊</button>
+          </div>
+        </td>
+        <td class="table-phonetic-cell">${item.phonetic || "-"}</td>
+        <td><span class="pos-tag">${item.pos || "n."}</span></td>
+        <td><strong>${item.zh}</strong></td>
+        <td><span class="badge cat-${item.category || "custom"}">${item.categoryLabel || "自訂"}</span></td>
+        <td>
+          <div class="table-ex-en">${item.example || "-"}</div>
+          <div class="table-ex-zh">${item.exampleZh || ""}</div>
+        </td>
+        <td>
+          <div class="table-action-btns">
+            <button class="btn-icon-sm" onclick="quickJumpToShadow(${item.id})" title="跳至跟讀訓練室反覆練習">🎧 跟讀</button>
+            <button class="btn-icon-sm" onclick="toggleMastered(${item.id})" title="切換已熟記狀態">
+              ${isMastered ? "✅ 熟" : "⬜ 熟"}
+            </button>
+            <button class="btn-icon-sm btn-del-sm" onclick="deleteSingleWord(${item.id})" title="刪除此單字">🗑️ 刪除</button>
+          </div>
+        </td>
+      </tr>
+    `;
+    })
+    .join("");
+}
+
+// 刪除熟悉或不需要的單字 (需求 2)
+function deleteSingleWord(id) {
+  const item = activeVocabList.find((v) => v.id === id);
+  if (!item) return;
+
+  if (confirm(`確定要從單字總表刪除單字「${item.word} (${item.zh})」嗎？\n（刪除後若需要可隨時透過「還原預設單字庫」或重新匯入）`)) {
+    activeVocabList = activeVocabList.filter((v) => v.id !== id);
+    appState.masteredIds = appState.masteredIds.filter((wId) => wId !== id);
+    appState.weakIds = appState.weakIds.filter((wId) => wId !== id);
+
+    if (appState.shadowSelectedWordId === id) {
+      stopShadowLoop();
+      appState.shadowSelectedWordId = activeVocabList.length > 0 ? activeVocabList[0].id : null;
+    }
+
+    saveVocabData();
+    saveProgress();
+    renderVocabSection();
+    renderVocabTable();
+    populateShadowWordDropdown();
+    updateShadowWordTarget();
+  }
+}
+
+// 批次匯入新單字解析器 (需求 2)
+function handleBatchImport() {
+  const textarea = document.getElementById("import-textarea");
+  const text = textarea.value.trim();
+  if (!text) {
+    alert("請先貼上或輸入您要匯入的單字清單！");
+    return;
+  }
+
+  const selectedCat = document.getElementById("import-cat-select").value;
+  const catLabels = {
+    engineering: "製程與工程",
+    business: "商務與管理",
+    career: "培訓與職涯",
+    idiom: "口語片語",
+    custom: "自訂新增"
+  };
+
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  let importedCount = 0;
+  let nextId = activeVocabList.reduce((max, item) => Math.max(max, item.id || 0), 0) + 1;
+
+  lines.forEach((line) => {
+    // 支援 Tab、逗號、多空格分隔：word \t zh \t pos \t example
+    let parts = line.includes("\t")
+      ? line.split("\t")
+      : line.includes(",")
+      ? line.split(",")
+      : line.split(/\s{2,}|\s+-\s+|\s*[:：]\s*/);
+
+    if (parts.length === 1) {
+      // 嘗試用第一個空格拆分
+      const firstSpaceIdx = line.indexOf(" ");
+      if (firstSpaceIdx > -1) {
+        parts = [line.slice(0, firstSpaceIdx), line.slice(firstSpaceIdx + 1)];
+      }
+    }
+
+    const word = (parts[0] || "").trim();
+    if (!word) return;
+
+    let zh = (parts[1] || "").trim() || "待補中文釋義";
+    let pos = "n.";
+    let example = "";
+    let exampleZh = "";
+
+    if (parts.length >= 3) {
+      // 如果第二部分是詞性 (例如 v. / n.)
+      if (/^(n\.|v\.|adj\.|adv\.|prep\.|phr\.)/i.test(parts[1].trim())) {
+        pos = parts[1].trim();
+        zh = parts[2].trim();
+        if (parts.length >= 4) example = parts[3].trim();
+      } else {
+        pos = parts[2].trim();
+        if (parts.length >= 4) example = parts[3].trim();
+      }
+    }
+
+    // 檢查是否重複，若已存在則更新中文釋義
+    const existing = activeVocabList.find((v) => v.word.toLowerCase() === word.toLowerCase());
+    if (existing) {
+      existing.zh = zh;
+      if (example) existing.example = example;
+    } else {
+      activeVocabList.push({
+        id: nextId++,
+        word: word,
+        phonetic: "",
+        pos: pos,
+        zh: zh,
+        category: selectedCat,
+        categoryLabel: catLabels[selectedCat] || "自訂新增",
+        example: example || `Please ensure that you understand the usage of ${word}.`,
+        exampleZh: `請確保您理解 ${word} 的具體用法。`,
+        memory: "自訂匯入新單字，可透過跟讀播放器加強記憶！"
+      });
+      importedCount++;
+    }
+  });
+
+  saveVocabData();
+  renderVocabSection();
+  renderVocabTable();
+  populateShadowWordDropdown();
+
+  textarea.value = "";
+  document.getElementById("import-modal").classList.add("hidden");
+  alert(`🎉 成功匯入／更新了 ${importedCount} 個新單字！總字彙量現為 ${activeVocabList.length} 個。`);
+}
+
+// 新增單筆單字
+function handleAddSingleWord() {
+  const word = document.getElementById("add-input-word").value.trim();
+  const zh = document.getElementById("add-input-zh").value.trim();
+  if (!word || !zh) {
+    alert("請至少填寫「英文單字」與「中文釋義」！");
+    return;
+  }
+
+  const phonetic = document.getElementById("add-input-phonetic").value.trim();
+  const pos = document.getElementById("add-input-pos").value.trim() || "n.";
+  const category = document.getElementById("add-input-category").value;
+  const example = document.getElementById("add-input-example").value.trim();
+  const exampleZh = document.getElementById("add-input-example-zh").value.trim();
+  const memory = document.getElementById("add-input-memory").value.trim();
+
+  const catLabels = {
+    engineering: "製程與工程",
+    business: "商務與管理",
+    career: "培訓與職涯",
+    idiom: "口語片語",
+    custom: "自訂新增"
+  };
+
+  const nextId = activeVocabList.reduce((max, item) => Math.max(max, item.id || 0), 0) + 1;
+  activeVocabList.push({
+    id: nextId,
+    word,
+    phonetic,
+    pos,
+    zh,
+    category,
+    categoryLabel: catLabels[category] || "自訂新增",
+    example: example || `Let's focus on mastering the term ${word}.`,
+    exampleZh: exampleZh || `讓我們專注掌握 ${word} 這個單字。`,
+    memory: memory || "自主新增單字"
+  });
+
+  saveVocabData();
+  renderVocabSection();
+  renderVocabTable();
+  populateShadowWordDropdown();
+
+  // 清空表單
+  document.getElementById("add-input-word").value = "";
+  document.getElementById("add-input-phonetic").value = "";
+  document.getElementById("add-input-zh").value = "";
+  document.getElementById("add-input-example").value = "";
+  document.getElementById("add-input-example-zh").value = "";
+  document.getElementById("add-input-memory").value = "";
+  document.getElementById("add-word-modal").classList.add("hidden");
+
+  alert(`✅ 單字「${word}」已成功新增至總表庫存中！`);
+}
+
+// 匯出備份 JSON
+function exportVocabJson() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeVocabList, null, 2));
+  const dlAnchor = document.createElement("a");
+  dlAnchor.setAttribute("href", dataStr);
+  dlAnchor.setAttribute("download", `vocabbuddy_backup_${new Date().toISOString().slice(0, 10)}.json`);
+  dlAnchor.click();
+  dlAnchor.remove();
+}
+
+// 還原為預設 59 個單字
+function restoreDefaultVocab() {
+  if (confirm("確定要將單字總表還原為初始的 59 個半導體、工程與商務單字嗎？\n（您自訂新增的單字將被重設）")) {
+    activeVocabList = JSON.parse(JSON.stringify(VOCAB_DATA));
+    saveVocabData();
+    renderVocabSection();
+    renderVocabTable();
+    populateShadowWordDropdown();
+    updateShadowWordTarget();
+    alert("🔄 已成功還原初始 59 個核心字彙清單！");
+  }
+}
+
+// ==================== 模組 4：閱讀理解挑戰 ====================
 function findVocabBySurfaceWord(surface) {
   const clean = surface.toLowerCase().trim();
   return (
-    VOCAB_DATA.find((v) => v.word.toLowerCase() === clean) ||
-    VOCAB_DATA.find((v) => clean.startsWith(v.word.toLowerCase().slice(0, 5)))
+    activeVocabList.find((v) => v.word.toLowerCase() === clean) ||
+    activeVocabList.find((v) => clean.startsWith(v.word.toLowerCase().slice(0, 5)))
   );
 }
 
@@ -451,7 +959,7 @@ function checkReadingQuiz() {
   banner.textContent = `🎉 閱讀測驗批改完成！您的得分：${correctCount} / ${READING_DATA.questions.length} 題正確。`;
 }
 
-// ==================== 模組 3：聽力與口說訓練腳本 ====================
+// 雙人對話短文播放器
 function renderListeningSection() {
   const listEl = document.getElementById("dialogue-list");
   listEl.innerHTML = DIALOGUE_DATA.map(
@@ -547,7 +1055,7 @@ function checkDictation(reveal = false) {
   });
 }
 
-// ==================== 模組 4：綜合測驗中心 ====================
+// ==================== 模組 5：綜合測驗中心 ====================
 function shuffleArray(arr) {
   const copy = [...arr];
   for (let i = copy.length - 1; i > 0; i--) {
@@ -565,46 +1073,46 @@ function loadStandardQuiz() {
 
 function generateDynamicQuiz(onlyWeak = false) {
   let pool = onlyWeak
-    ? VOCAB_DATA.filter((v) => appState.weakIds.includes(v.id))
-    : [...VOCAB_DATA];
+    ? activeVocabList.filter((v) => appState.weakIds.includes(v.id))
+    : [...activeVocabList];
 
   if (onlyWeak && pool.length < 5) {
     alert(`目前「待加強弱點本」只有 ${pool.length} 個單字，系統將自動補齊其他高頻單字組成完整測驗！`);
-    const others = shuffleArray(VOCAB_DATA.filter((v) => !appState.weakIds.includes(v.id)));
+    const others = shuffleArray(activeVocabList.filter((v) => !appState.weakIds.includes(v.id)));
     pool = [...pool, ...others.slice(0, 10 - pool.length)];
   }
 
   const shuffled = shuffleArray(pool);
   const mcItems = shuffled.slice(0, 5).map((target) => {
-    const distractors = shuffleArray(VOCAB_DATA.filter((v) => v.id !== target.id && v.pos === target.pos))
+    const distractors = shuffleArray(activeVocabList.filter((v) => v.id !== target.id && v.pos === target.pos))
       .slice(0, 3)
       .map((d) => d.word);
     while (distractors.length < 3) {
-      const rand = VOCAB_DATA[Math.floor(Math.random() * VOCAB_DATA.length)].word;
+      const rand = activeVocabList[Math.floor(Math.random() * activeVocabList.length)].word;
       if (rand !== target.word && !distractors.includes(rand)) distractors.push(rand);
     }
     const regex = new RegExp(`\\b${target.word}\\b`, "gi");
-    const maskedSentence = target.example.replace(regex, "__________");
+    const maskedSentence = (target.example || `${target.word} is important.`).replace(regex, "__________");
     return {
       q: `${maskedSentence} （提示：${target.zh}）`,
       options: shuffleArray([target.word, ...distractors]),
       answer: target.word,
       wordId: target.id,
-      explanation: `正確單字為 ${target.word} (${target.pos} ${target.zh})。完整例句：${target.example}`
+      explanation: `正確單字為 ${target.word} (${target.pos || "n."} ${target.zh})。完整例句：${target.example || ""}`
     };
   });
 
   const fibSource = shuffled.slice(5, 10).length >= 5 ? shuffled.slice(5, 10) : shuffled.slice(0, 5);
   const fibItems = fibSource.map((target) => {
     const regex = new RegExp(`\\b${target.word}\\b`, "gi");
-    const masked = target.example.replace(regex, "__________");
+    const masked = (target.example || `${target.word} is key.`).replace(regex, "__________");
     return {
       sentence: masked,
       prefix: target.word.slice(0, 1),
       zhHint: target.zh,
       answer: target.word,
       wordId: target.id,
-      explanation: `${target.word}（${target.zh}）。記憶提示：${target.memory}`
+      explanation: `${target.word}（${target.zh}）。記憶提示：${target.memory || ""}`
     };
   });
 
@@ -768,21 +1276,21 @@ function submitAndGradeQuiz(revealOnly = false) {
 
 // ==================== 彈窗 Modal 控制 ====================
 function openWordModal(id) {
-  const item = VOCAB_DATA.find((v) => v.id === id);
+  const item = activeVocabList.find((v) => v.id === id);
   if (!item) return;
   appState.activeModalWordId = id;
 
   const catEl = document.getElementById("modal-cat");
-  catEl.textContent = item.categoryLabel;
-  catEl.className = `badge cat-${item.category}`;
+  catEl.textContent = item.categoryLabel || "自訂";
+  catEl.className = `badge cat-${item.category || "custom"}`;
 
   document.getElementById("modal-word").textContent = item.word;
-  document.getElementById("modal-pos").textContent = item.pos;
-  document.getElementById("modal-phonetic").textContent = item.phonetic;
+  document.getElementById("modal-pos").textContent = item.pos || "n.";
+  document.getElementById("modal-phonetic").textContent = item.phonetic || "";
   document.getElementById("modal-zh").textContent = item.zh;
-  document.getElementById("modal-ex").textContent = item.example;
-  document.getElementById("modal-ex-zh").textContent = item.exampleZh;
-  document.getElementById("modal-memory").textContent = item.memory;
+  document.getElementById("modal-ex").textContent = item.example || "";
+  document.getElementById("modal-ex-zh").textContent = item.exampleZh || "";
+  document.getElementById("modal-memory").textContent = item.memory || "";
 
   document.getElementById("word-modal").classList.remove("hidden");
   speakText(item.word);
@@ -790,14 +1298,16 @@ function openWordModal(id) {
 
 // ==================== 初始化與事件綁定 ====================
 document.addEventListener("DOMContentLoaded", () => {
+  initVocabData();
   loadProgress();
   updateHeaderStats();
   renderVocabSection();
-  renderReadingSection();
+  initShadowingStation();
   renderListeningSection();
+  renderVocabTable();
   loadStandardQuiz();
 
-  // 切換四大模組 Tabs
+  // 切換五大模組 Tabs
   document.querySelectorAll(".nav-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".nav-tab").forEach((t) => t.classList.remove("active"));
@@ -806,11 +1316,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = tab.getAttribute("data-tab");
       document.getElementById(`tab-${target}`).classList.add("active");
       window.speechSynthesis.cancel();
+      stopShadowLoop();
       dialogueStopFlag = true;
+
+      if (target === "table") {
+        renderVocabTable();
+      }
     });
   });
 
-  // 搜尋與分類篩選
+  // 搜尋與分類篩選 (卡片)
   document.getElementById("vocab-search").addEventListener("input", (e) => {
     appState.searchQuery = e.target.value;
     appState.flashcardIndex = 0;
@@ -842,7 +1357,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderVocabSection();
   });
 
-  // 閃卡互動
+  // 閃卡翻面與切換
   const fcBox = document.getElementById("flashcard-box");
   fcBox.addEventListener("click", (e) => {
     if (e.target.id === "fc-speak-front") return;
@@ -893,6 +1408,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // 總表管理事件綁定 (需求 2)
+  document.getElementById("table-search-input").addEventListener("input", (e) => {
+    appState.tableSearch = e.target.value;
+    renderVocabTable();
+  });
+
+  document.getElementById("table-cat-filter").addEventListener("change", (e) => {
+    appState.tableCategory = e.target.value;
+    renderVocabTable();
+  });
+
+  document.getElementById("btn-open-import-modal").addEventListener("click", () => {
+    document.getElementById("import-modal").classList.remove("hidden");
+  });
+
+  document.getElementById("btn-submit-import").addEventListener("click", handleBatchImport);
+
+  document.getElementById("btn-open-add-single").addEventListener("click", () => {
+    document.getElementById("add-word-modal").classList.remove("hidden");
+  });
+
+  document.getElementById("btn-save-single-word").addEventListener("click", handleAddSingleWord);
+  document.getElementById("btn-export-vocab").addEventListener("click", exportVocabJson);
+  document.getElementById("btn-restore-defaults").addEventListener("click", restoreDefaultVocab);
+
   // 閱讀模組按鈕
   document.getElementById("btn-toggle-reading-zh").addEventListener("click", () => {
     appState.showReadingZh = !appState.showReadingZh;
@@ -912,7 +1452,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("reading-score-banner").classList.add("hidden");
   });
 
-  // 聽力與口說模組按鈕
+  // 聽力對話模組按鈕
   document.getElementById("btn-play-dialogue").addEventListener("click", () => playFullDialogue(0));
   document.getElementById("btn-stop-dialogue").addEventListener("click", () => {
     dialogueStopFlag = true;
@@ -939,11 +1479,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 重置進度
   document.getElementById("btn-reset-progress").addEventListener("click", () => {
-    if (confirm("確定要清除所有「已熟記」與「待加強」紀錄嗎？")) {
+    if (confirm("確定要清除所有「已熟記」與「待加強」紀錄嗎？（單字庫資料會保留）")) {
       appState.masteredIds = [];
       appState.weakIds = [];
       saveProgress();
       renderVocabSection();
+      renderVocabTable();
     }
   });
 
@@ -957,7 +1498,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("modal-speak").addEventListener("click", () => {
-    const item = VOCAB_DATA.find((v) => v.id === appState.activeModalWordId);
+    const item = activeVocabList.find((v) => v.id === appState.activeModalWordId);
     if (item) speakText(item.word);
   });
   document.getElementById("modal-btn-weak").addEventListener("click", () => {
@@ -983,7 +1524,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (inAppBanner) inAppBanner.style.display = "flex";
   }
 
-  // 註冊 Service Worker (支援離線快取與 PWA 安裝)
+  // 註冊 Service Worker
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("sw.js").catch((err) => {
